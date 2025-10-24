@@ -7,7 +7,6 @@ import Mathlib.Lean.Meta.RefinedDiscrTree
 import Mathlib.Tactic.Widget.InteractiveUnfold
 import InfoviewSuggest.SuggestionDisplayComponent
 import ProofWidgets.Component.FilterDetails
-import Batteries.Lean.Position
 
 /-!
 # Point & click library rewriting
@@ -59,7 +58,7 @@ Ways to extend `rw!?`:
 
 /-! ### Caching -/
 
-namespace InteractiveSuggestions.LibraryRewrite
+namespace InfoviewSuggest.LibraryRewrite
 
 open Lean Meta RefinedDiscrTree Mathlib.Tactic
 
@@ -520,13 +519,11 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
           This usually occurs when trying to rewrite a term that appears as a dependent argument."
       let location ← loc.fvarId?.mapM FVarId.getUserName
 
-      let range : Lsp.Range ← do
+      let range : Lsp.Range :=
         if let .some range := props.replaceRange then
-          IO.println "Invocation from tactic"
-          pure range
+          range
         else
-          IO.println "Invocation from click"
-          pure ⟨props.pos, props.pos⟩
+          ⟨props.pos, props.pos⟩
 
       let unfoldsHtml ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
       let data ← WithRpcRef.mk { occ, loc := location, range := range, expr := ← ExprWithCtx.save subExpr }
@@ -556,6 +553,6 @@ are filtered out, as well as rewrites that have new metavariables in the replace
 To see all suggestions, click on the filter button (▼) in the top right.
 -/
 elab stx:"rw!?" : tactic => do
-  let some range := (← getFileMap).rangeOfStx? stx | return
+  let some range := (← getFileMap).lspRangeOfStx? stx | return
   Widget.savePanelWidgetInfo (hash LibraryRewriteComponent.javascript)
     (pure <| json% { replaceRange: $range }) stx
