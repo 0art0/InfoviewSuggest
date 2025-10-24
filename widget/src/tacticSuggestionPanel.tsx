@@ -172,9 +172,9 @@ function reducer(state: TacticSuggestionPanelState, action: PremiseWithValidatio
     } else {
       successes.splice(index, 0, action.result);
     }
-    return { ...state, successes };
+    return { successes, failures: state.failures, pending: state.pending.filter(result => result.name !== action.result.name) };
   } else if (action.kind === "error") {
-    return { ...state, failures: [...state.failures, action.result] };
+    return { successes: state.successes, failures: [...state.failures, action.result], pending: state.pending.filter(result => result.name !== action.result.name) };
   } else {
     return { successes: [], failures: [], pending: action.result.premises };
   }
