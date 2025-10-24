@@ -1,0 +1,14 @@
+name = "InfoviewSuggest"
+version = "0.1.0"
+defaultTargets = ["infoviewsuggest"]
+
+[[lean_lib]]
+name = "InfoviewSuggest"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[lean_exe]]
+name = "infoviewsuggest"
+root = "Main"
