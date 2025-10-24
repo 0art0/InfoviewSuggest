@@ -1,0 +1,22 @@
+{
+  "name": "widget",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@types/rollup": "^0.51.4",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@leanprover/infoview": "^0.10.0",
+    "tslib": "^2.8.1",
+    "vscode-languageserver-protocol": "^3.17.5"
+  }
+}
