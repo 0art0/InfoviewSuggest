@@ -528,7 +528,6 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
       let unfoldsHtml ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
       let data ← WithRpcRef.mk { occ, loc := location, range := range, expr := ← ExprWithCtx.save subExpr }
       let all ← getLongList subExpr
-      let all := if h : all.size = 0 then #[] else #[all[0]]
       renderRewrites subExpr all unfoldsHtml range doc data
 
       -- return <FilterDetails
