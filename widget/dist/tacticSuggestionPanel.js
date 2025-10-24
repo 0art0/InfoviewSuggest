@@ -85,10 +85,10 @@ function reducer(state, action) {
         else {
             successes.splice(index, 0, action.result);
         }
-        return { ...state, successes };
+        return { successes, failures: state.failures, pending: state.pending.filter(result => result.name !== action.result.name) };
     }
     else if (action.kind === "error") {
-        return { ...state, failures: [...state.failures, action.result] };
+        return { successes: state.successes, failures: [...state.failures, action.result], pending: state.pending.filter(result => result.name !== action.result.name) };
     }
     else {
         return { successes: [], failures: [], pending: action.result.premises };
@@ -102,7 +102,6 @@ async function applyEdit(edit, documentUri, ec) {
     });
 }
 function renderSuccessResult(ec, result, showName, range, documentUri) {
-    // const [isHovered, setIsHovered] = React.useState(false);
     const handleTryThis = async () => {
         const edit = {
             range: range,
@@ -110,104 +109,176 @@ function renderSuccessResult(ec, result, showName, range, documentUri) {
         };
         await applyEdit(edit, documentUri, ec);
     };
-    return (_jsxs("div", { style: {
+    return (_jsx("div", { style: {
             display: 'flex',
             gap: '12px',
-            padding: '16px',
-            marginBottom: '12px',
-            backgroundColor: '#f8f9fa', // isHovered ? '#f8f9fa' : '#ffffff',
+            padding: '12px',
+            backgroundColor: '#f8fafc',
             borderRadius: '8px',
-            border: '1px solid #e1e4e8',
+            border: '1px solid #e2e8f0',
             transition: 'all 0.2s ease',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.08)' // isHovered ? '0 2px 8px rgba(0,0,0,0.08)' : '0 1px 3px rgba(0,0,0,0.04)',
-        }, children: [_jsx("button", { onClick: handleTryThis, style: {
-                    flexShrink: 0,
-                    padding: '8px 16px',
-                    backgroundColor: '#0969da',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                    height: 'fit-content',
-                    alignSelf: 'flex-start',
-                }, children: "Try this" }), _jsxs("div", { style: { flex: 1, minWidth: 0 }, children: [_jsx("div", { style: {
-                            marginBottom: '12px',
-                            padding: '12px',
-                            backgroundColor: '#f6f8fa',
-                            borderRadius: '6px',
-                            border: '1px solid #d0d7de',
-                        }, children: _jsx(InteractiveCode, { fmt: result.replacementText }) }), result.extraGoals.length > 0 && (_jsxs("div", { style: { marginBottom: '12px' }, children: [_jsx("div", { style: {
-                                    fontSize: '12px',
-                                    fontWeight: '600',
-                                    color: '#57606a',
-                                    marginBottom: '8px',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px',
-                                }, children: "Additional Goals" }), result.extraGoals.map((goal, index) => (_jsxs("div", { style: {
-                                    marginBottom: '8px',
-                                    padding: '10px 12px',
-                                    backgroundColor: '#fff8e5',
-                                    borderLeft: '3px solid #f59e0b',
-                                    borderRadius: '4px',
-                                    fontSize: '14px',
-                                }, children: [_jsx("strong", { className: "goal-vdash", children: "\u22A2 " }), _jsx(InteractiveCode, { fmt: goal })] }, index)))] })), showName && (_jsxs("div", { style: {
-                            padding: '10px 12px',
-                            backgroundColor: '#e6f3ff',
-                            borderRadius: '6px',
-                            border: '1px solid #b3d9ff',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+        }, children: _jsxs("div", { style: { flex: 1, minWidth: 0 }, children: [_jsxs("div", { style: {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: showName || result.extraGoals.length > 0 ? '8px' : 0
+                    }, children: [_jsx("div", { style: {
+                                flex: 1,
+                                fontSize: '14px',
+                                fontFamily: 'monospace',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                            }, children: _jsx(InteractiveCode, { fmt: result.replacementText }) }), _jsx("button", { onClick: handleTryThis, style: {
+                                padding: '6px 12px',
+                                backgroundColor: '#0969da',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '13px',
+                                fontWeight: '500',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                flexShrink: 0
+                            }, onMouseEnter: (e) => {
+                                e.currentTarget.style.backgroundColor = '#0860ca';
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                            }, onMouseLeave: (e) => {
+                                e.currentTarget.style.backgroundColor = '#0969da';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                            }, children: "Try this" })] }), result.extraGoals.length > 0 && (_jsx("div", { style: {
+                        marginBottom: showName ? '8px' : 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                    }, children: result.extraGoals.map((goal, index) => (_jsxs("div", { style: {
+                            padding: '4px 8px',
+                            backgroundColor: '#f1f5f9',
+                            borderLeft: '2px solid var(--vscode-lean4-infoView\\.turnstile)',
+                            borderRadius: '4px',
                             fontSize: '13px',
-                            color: '#0550ae',
-                        }, children: [_jsx("span", { style: { fontWeight: '600', marginRight: '6px' }, children: "Lemma:" }), _jsx(InteractiveCode, { fmt: result.prettyLemma })] }))] })] }));
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                        }, children: [_jsx("span", { style: {
+                                    color: 'var(--vscode-lean4-infoView\\.turnstile)',
+                                    fontWeight: '500',
+                                    userSelect: 'none'
+                                }, children: "\u22A2" }), _jsx("span", { style: {
+                                    flex: 1,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                }, children: _jsx(InteractiveCode, { fmt: goal }) })] }, index))) })), showName && (_jsxs("div", { style: {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '12px',
+                        color: '#64748b'
+                    }, children: [_jsx("span", { style: { fontWeight: '500' }, children: "Lemma:" }), _jsx("span", { style: {
+                                flex: 1,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                            }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) }), _jsx("button", { onClick: () => navigator.clipboard.writeText(result.name.toString()), style: {
+                                background: 'none',
+                                border: 'none',
+                                padding: '4px',
+                                cursor: 'pointer',
+                                color: '#64748b',
+                                opacity: 0.7,
+                                transition: 'all 0.2s ease',
+                                display: 'flex',
+                                alignItems: 'center',
+                                flexShrink: 0
+                            }, title: "Copy lemma name", onMouseEnter: e => e.currentTarget.style.opacity = '1', onMouseLeave: e => e.currentTarget.style.opacity = '0.7', children: "\uD83D\uDCCB" })] }))] }) }));
 }
 function renderErrorResult(result) {
+    const handleCopy = () => {
+        navigator.clipboard.writeText(result.name.toString());
+    };
     return (_jsxs("div", { style: {
-            padding: '12px 16px',
-            marginBottom: '8px',
-            backgroundColor: '#fff1f0',
-            borderLeft: '3px solid #d73a49',
-            borderRadius: '4px',
-        }, children: [_jsxs("div", { style: {
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    marginBottom: '8px',
-                }, children: [_jsx("span", { style: {
-                            fontSize: '16px',
-                            color: '#d73a49',
-                        }, children: "\u2717" }), _jsx("span", { style: {
-                            fontSize: '14px',
-                            color: '#24292f',
-                            fontFamily: 'monospace',
-                            fontWeight: '600',
-                        }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) })] }), _jsx("div", { style: {
-                    paddingLeft: '24px',
-                    fontSize: '13px',
-                    color: '#57606a',
-                    lineHeight: '1.5',
-                }, children: _jsx(InteractiveMessageData, { msg: result.error }) })] }));
-}
-function renderPendingResult(result) {
-    return (_jsxs("div", { style: {
-            padding: '12px 16px',
-            marginBottom: '8px',
-            backgroundColor: '#f6f8fa',
-            borderLeft: '3px solid #8b949e',
-            borderRadius: '4px',
+            padding: '8px 12px',
+            marginBottom: '6px',
+            background: 'linear-gradient(to right, #fef2f2, #fee2e2)',
+            border: '1px solid #fecaca',
+            borderRadius: '6px',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-        }, children: [_jsx("span", { style: {
+        }, children: [_jsxs("div", { style: {
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    minWidth: 0
+                }, children: [_jsx("div", { style: {
+                            fontSize: '14px',
+                            color: '#991b1b',
+                            fontFamily: 'monospace',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                        }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) }), _jsx("div", { style: {
+                            fontSize: '12px',
+                            color: '#7f1d1d',
+                            lineHeight: '1.4'
+                        }, children: _jsx(InteractiveMessageData, { msg: result.error }) })] }), _jsx("button", { onClick: handleCopy, style: {
+                    background: 'none',
+                    border: 'none',
+                    padding: '4px',
+                    cursor: 'pointer',
+                    color: '#dc2626',
+                    opacity: 0.6,
+                    transition: 'opacity 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexShrink: 0
+                }, title: "Copy lemma name", onMouseEnter: e => e.currentTarget.style.opacity = '1', onMouseLeave: e => e.currentTarget.style.opacity = '0.6', children: "\uD83D\uDCCB" })] }));
+}
+function renderPendingResult(result) {
+    const handleCopy = () => {
+        navigator.clipboard.writeText(result.name);
+    };
+    return (_jsxs("div", { style: {
+            padding: '8px 12px',
+            marginBottom: '6px',
+            background: 'linear-gradient(to right, #fffbeb, #fef9c3)',
+            border: '1px solid #fde68a',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            position: 'relative',
+            transition: 'all 0.2s ease',
+        }, children: [_jsx("div", { style: {
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    borderTop: '2px solid #d97706',
+                    borderRight: '2px solid transparent',
+                    animation: 'spin 0.8s linear infinite',
+                    flexShrink: 0
+                } }), _jsx("div", { style: {
+                    flex: 1,
                     fontSize: '14px',
-                    color: '#8b949e',
-                    animation: 'spin 1s linear infinite',
-                }, children: "\u27F3" }), _jsx("span", { style: {
-                    fontSize: '14px',
-                    color: '#57606a',
+                    color: '#92400e',
                     fontFamily: 'monospace',
-                }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) }), _jsx("style", { children: `
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) }), _jsx("button", { onClick: handleCopy, style: {
+                    background: 'none',
+                    border: 'none',
+                    padding: '4px',
+                    cursor: 'pointer',
+                    color: '#b45309',
+                    opacity: 0.6,
+                    transition: 'opacity 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                }, title: "Copy lemma name", onMouseEnter: e => e.currentTarget.style.opacity = '1', onMouseLeave: e => e.currentTarget.style.opacity = '0.6', children: "\uD83D\uDCCB" }), _jsx("style", { children: `
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
@@ -221,7 +292,62 @@ function renderValidationState(ec, state, range, documentUri) {
     const filterResults = true;
     const showNames = true;
     const successes = filterResults ? eraseEquivalentEntries(state.successes) : state.successes;
-    return (_jsxs("div", { children: [showPending && state.pending.map((p, i) => (_jsx("div", { children: renderPendingResult(p) }, `pending-${i}`))), showFailed && state.failures.map((f, i) => (_jsx("div", { children: renderErrorResult(f) }, `fail-${i}`))), successes.map((s, i) => (_jsx("div", { children: renderSuccessResult(ec, s, showNames, range, documentUri) }, `succ-${i}`)))] }));
+    return (_jsxs("div", { style: {
+            backgroundColor: 'white',
+            border: '1px solid #e1e4e8',
+            borderRadius: '8px',
+            padding: '16px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+        }, children: [successes.length > 0 && (_jsx("div", { style: { marginBottom: '16px' }, children: successes.map((s, i) => (_jsx("div", { children: renderSuccessResult(ec, s, showNames, range, documentUri) }, `succ-${i}`))) })), state.failures.length > 0 && (_jsxs("details", { style: { marginBottom: '16px' }, children: [_jsxs("summary", { style: {
+                            padding: '8px 12px',
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            borderRadius: '4px',
+                            backgroundColor: '#fff5f5',
+                            marginBottom: '8px'
+                        }, children: [_jsx("span", { style: { color: '#e11d48', fontSize: '16px' }, children: "\u2715" }), _jsxs("span", { style: { fontWeight: 500 }, children: ["Failures (", state.failures.length, ")"] })] }), state.failures.map((f, i) => (_jsx("div", { children: renderErrorResult(f) }, `fail-${i}`)))] })), state.pending.length > 0 && (_jsxs("details", { open: true, style: { marginBottom: '16px' }, children: [_jsxs("summary", { style: {
+                            padding: '8px 12px',
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            borderRadius: '4px',
+                            backgroundColor: '#fefce8',
+                            marginBottom: '8px'
+                        }, children: [_jsx("span", { style: {
+                                    color: '#ca8a04',
+                                    fontSize: '16px',
+                                    display: 'inline-block',
+                                    animation: 'spin 2s linear infinite'
+                                }, children: "\u231A" }), _jsxs("span", { style: { fontWeight: 500 }, children: ["In Progress (", state.pending.length, ")"] })] }), state.pending.map((p, i) => (_jsx("div", { children: renderPendingResult(p) }, `pending-${i}`)))] })), _jsx("style", { children: `
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      
+      details > summary {
+        list-style: none;
+      }
+      details > summary::-webkit-details-marker {
+        display: none;
+      }
+      details > summary::before {
+        content: '▶';
+        margin-right: 8px;
+        transition: transform 0.2s;
+        display: inline-block;
+      }
+      details[open] > summary::before {
+        transform: rotate(90deg);
+      }
+      details summary:hover {
+        background-color: rgba(0,0,0,0.03);
+      }
+    ` })] }));
 }
 /**
  * The `TacticSuggestionsPanel` component.
