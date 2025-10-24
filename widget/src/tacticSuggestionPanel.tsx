@@ -216,16 +216,6 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
           gap: '8px',
           marginBottom: showName || result.extraGoals.length > 0 ? '8px' : 0
         }}>
-          <div style={{
-            flex: 1,
-            fontSize: '14px',
-            fontFamily: 'monospace',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap'
-          }}>
-            <InteractiveCode fmt={result.replacementText} />
-          </div>
           <button
             onClick={handleTryThis}
             style={{
@@ -238,7 +228,8 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
               fontWeight: '500',
               cursor: 'pointer',
               transition: 'all 0.2s ease',
-              flexShrink: 0
+              flexShrink: 0,
+              alignSelf: 'flex-start'
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.backgroundColor = '#0860ca';
@@ -251,6 +242,16 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
           >
             Try this
           </button>
+          <div style={{
+            fontSize: '14px',
+            fontFamily: 'monospace',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            marginBottom: showName || result.extraGoals.length > 0 ? '8px' : 0
+          }}>
+            <InteractiveCode fmt={result.replacementText} />
+          </div>
         </div>
 
         {/* Extra Goals */}
@@ -292,42 +293,57 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
 
         {/* Lemma Name */}
         {showName && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '12px',
-            color: '#64748b'
-          }}>
-            <span style={{ fontWeight: '500' }}>Lemma:</span>
-            <span style={{
-              flex: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
+          <div>
+            <hr style={{
+              border: 'none',
+              borderTop: '1px solid #e2e8f0',
+              margin: '12px 0 12px 0'
+            }} />
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '12px',
+              color: '#64748b'
             }}>
-              <InteractiveCode fmt={result.prettyLemma} />
-            </span>
-            <button
-              onClick={() => navigator.clipboard.writeText(result.name.toString())}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: '4px',
-                cursor: 'pointer',
-                color: '#64748b',
-                opacity: 0.7,
-                transition: 'all 0.2s ease',
-                display: 'flex',
-                alignItems: 'center',
-                flexShrink: 0
-              }}
-              title="Copy lemma name"
-              onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '0.7'}
-            >
-              📋
-            </button>
+              <span style={{ 
+                fontWeight: '600',
+                textTransform: 'uppercase',
+                letterSpacing: '0.025em',
+                fontSize: '11px',
+                color: '#475569'
+              }}>Lemma</span>
+              <span style={{
+                flex: 1,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                <InteractiveCode fmt={result.prettyLemma} />
+              </span>
+              <button
+                onClick={() => navigator.clipboard.writeText(result.name.toString())}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: '4px',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  opacity: 0.7,
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                  fontSize: '14px'
+                }}
+                title="Copy lemma name"
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '0.7'}
+              >
+                {/* Using a different clipboard icon */}
+                📋
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -500,7 +516,9 @@ return (
     {successes.length > 0 && (
       <div style={{ marginBottom: '16px' }}>
         {successes.map((s, i) => (
-          <div key={`succ-${i}`}>{renderSuccessResult(ec, s, showNames, range, documentUri)}</div>
+          <div key={`succ-${i}`} style={{ marginBottom: '8px' }}>
+            {renderSuccessResult(ec, s, showNames, range, documentUri)}
+          </div>
         ))}
       </div>
     )}
@@ -525,7 +543,7 @@ return (
           </span>
         </summary>
         {state.failures.map((f, i) => (
-          <div key={`fail-${i}`}>{renderErrorResult(f)}</div>
+          <div key={`fail-${i}`} style={{ marginBottom: '8px' }}>{renderErrorResult(f)}</div>
         ))}
       </details>
     )}
@@ -555,7 +573,7 @@ return (
           </span>
         </summary>
         {state.pending.map((p, i) => (
-          <div key={`pending-${i}`}>{renderPendingResult(p)}</div>
+          <div key={`pending-${i}`} style={{ marginBottom: '8px' }}>{renderPendingResult(p)}</div>
         ))}
       </details>
     )}

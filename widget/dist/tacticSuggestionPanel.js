@@ -123,14 +123,7 @@ function renderSuccessResult(ec, result, showName, range, documentUri) {
                         alignItems: 'center',
                         gap: '8px',
                         marginBottom: showName || result.extraGoals.length > 0 ? '8px' : 0
-                    }, children: [_jsx("div", { style: {
-                                flex: 1,
-                                fontSize: '14px',
-                                fontFamily: 'monospace',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                            }, children: _jsx(InteractiveCode, { fmt: result.replacementText }) }), _jsx("button", { onClick: handleTryThis, style: {
+                    }, children: [_jsx("button", { onClick: handleTryThis, style: {
                                 padding: '6px 12px',
                                 backgroundColor: '#0969da',
                                 color: 'white',
@@ -140,14 +133,22 @@ function renderSuccessResult(ec, result, showName, range, documentUri) {
                                 fontWeight: '500',
                                 cursor: 'pointer',
                                 transition: 'all 0.2s ease',
-                                flexShrink: 0
+                                flexShrink: 0,
+                                alignSelf: 'flex-start'
                             }, onMouseEnter: (e) => {
                                 e.currentTarget.style.backgroundColor = '#0860ca';
                                 e.currentTarget.style.transform = 'translateY(-1px)';
                             }, onMouseLeave: (e) => {
                                 e.currentTarget.style.backgroundColor = '#0969da';
                                 e.currentTarget.style.transform = 'translateY(0)';
-                            }, children: "Try this" })] }), result.extraGoals.length > 0 && (_jsx("div", { style: {
+                            }, children: "Try this" }), _jsx("div", { style: {
+                                fontSize: '14px',
+                                fontFamily: 'monospace',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginBottom: showName || result.extraGoals.length > 0 ? '8px' : 0
+                            }, children: _jsx(InteractiveCode, { fmt: result.replacementText }) })] }), result.extraGoals.length > 0 && (_jsx("div", { style: {
                         marginBottom: showName ? '8px' : 0,
                         display: 'flex',
                         flexDirection: 'column',
@@ -170,29 +171,40 @@ function renderSuccessResult(ec, result, showName, range, documentUri) {
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
                                     whiteSpace: 'nowrap'
-                                }, children: _jsx(InteractiveCode, { fmt: goal }) })] }, index))) })), showName && (_jsxs("div", { style: {
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        fontSize: '12px',
-                        color: '#64748b'
-                    }, children: [_jsx("span", { style: { fontWeight: '500' }, children: "Lemma:" }), _jsx("span", { style: {
-                                flex: 1,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                            }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) }), _jsx("button", { onClick: () => navigator.clipboard.writeText(result.name.toString()), style: {
-                                background: 'none',
+                                }, children: _jsx(InteractiveCode, { fmt: goal }) })] }, index))) })), showName && (_jsxs("div", { children: [_jsx("hr", { style: {
                                 border: 'none',
-                                padding: '4px',
-                                cursor: 'pointer',
-                                color: '#64748b',
-                                opacity: 0.7,
-                                transition: 'all 0.2s ease',
+                                borderTop: '1px solid #e2e8f0',
+                                margin: '12px 0 12px 0'
+                            } }), _jsxs("div", { style: {
                                 display: 'flex',
                                 alignItems: 'center',
-                                flexShrink: 0
-                            }, title: "Copy lemma name", onMouseEnter: e => e.currentTarget.style.opacity = '1', onMouseLeave: e => e.currentTarget.style.opacity = '0.7', children: "\uD83D\uDCCB" })] }))] }) }));
+                                gap: '8px',
+                                fontSize: '12px',
+                                color: '#64748b'
+                            }, children: [_jsx("span", { style: {
+                                        fontWeight: '600',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.025em',
+                                        fontSize: '11px',
+                                        color: '#475569'
+                                    }, children: "Lemma" }), _jsx("span", { style: {
+                                        flex: 1,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                    }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) }), _jsx("button", { onClick: () => navigator.clipboard.writeText(result.name.toString()), style: {
+                                        background: 'none',
+                                        border: 'none',
+                                        padding: '4px',
+                                        cursor: 'pointer',
+                                        color: '#64748b',
+                                        opacity: 0.7,
+                                        transition: 'all 0.2s ease',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        flexShrink: 0,
+                                        fontSize: '14px'
+                                    }, title: "Copy lemma name", onMouseEnter: e => e.currentTarget.style.opacity = '1', onMouseLeave: e => e.currentTarget.style.opacity = '0.7', children: "\uD83D\uDCCB" })] })] }))] }) }));
 }
 function renderErrorResult(result) {
     const handleCopy = () => {
@@ -298,7 +310,7 @@ function renderValidationState(ec, state, range, documentUri) {
             borderRadius: '8px',
             padding: '16px',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-        }, children: [successes.length > 0 && (_jsx("div", { style: { marginBottom: '16px' }, children: successes.map((s, i) => (_jsx("div", { children: renderSuccessResult(ec, s, showNames, range, documentUri) }, `succ-${i}`))) })), state.failures.length > 0 && (_jsxs("details", { style: { marginBottom: '16px' }, children: [_jsxs("summary", { style: {
+        }, children: [successes.length > 0 && (_jsx("div", { style: { marginBottom: '16px' }, children: successes.map((s, i) => (_jsx("div", { style: { marginBottom: '8px' }, children: renderSuccessResult(ec, s, showNames, range, documentUri) }, `succ-${i}`))) })), state.failures.length > 0 && (_jsxs("details", { style: { marginBottom: '16px' }, children: [_jsxs("summary", { style: {
                             padding: '8px 12px',
                             cursor: 'pointer',
                             userSelect: 'none',
@@ -308,7 +320,7 @@ function renderValidationState(ec, state, range, documentUri) {
                             borderRadius: '4px',
                             backgroundColor: '#fff5f5',
                             marginBottom: '8px'
-                        }, children: [_jsx("span", { style: { color: '#e11d48', fontSize: '16px' }, children: "\u2715" }), _jsxs("span", { style: { fontWeight: 500 }, children: ["Failures (", state.failures.length, ")"] })] }), state.failures.map((f, i) => (_jsx("div", { children: renderErrorResult(f) }, `fail-${i}`)))] })), state.pending.length > 0 && (_jsxs("details", { open: true, style: { marginBottom: '16px' }, children: [_jsxs("summary", { style: {
+                        }, children: [_jsx("span", { style: { color: '#e11d48', fontSize: '16px' }, children: "\u2715" }), _jsxs("span", { style: { fontWeight: 500 }, children: ["Failures (", state.failures.length, ")"] })] }), state.failures.map((f, i) => (_jsx("div", { style: { marginBottom: '8px' }, children: renderErrorResult(f) }, `fail-${i}`)))] })), state.pending.length > 0 && (_jsxs("details", { open: true, style: { marginBottom: '16px' }, children: [_jsxs("summary", { style: {
                             padding: '8px 12px',
                             cursor: 'pointer',
                             userSelect: 'none',
@@ -323,7 +335,7 @@ function renderValidationState(ec, state, range, documentUri) {
                                     fontSize: '16px',
                                     display: 'inline-block',
                                     animation: 'spin 2s linear infinite'
-                                }, children: "\u231A" }), _jsxs("span", { style: { fontWeight: 500 }, children: ["In Progress (", state.pending.length, ")"] })] }), state.pending.map((p, i) => (_jsx("div", { children: renderPendingResult(p) }, `pending-${i}`)))] })), _jsx("style", { children: `
+                                }, children: "\u231A" }), _jsxs("span", { style: { fontWeight: 500 }, children: ["In Progress (", state.pending.length, ")"] })] }), state.pending.map((p, i) => (_jsx("div", { style: { marginBottom: '8px' }, children: renderPendingResult(p) }, `pending-${i}`)))] })), _jsx("style", { children: `
       @keyframes spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
