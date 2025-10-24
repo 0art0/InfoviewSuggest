@@ -70,6 +70,10 @@ structure RewriteLemma where
   symm : Bool
 deriving BEq, Inhabited, ToJson, FromJson
 
+structure RewriteLemmaWithDisplay extends RewriteLemma where
+  prettyLemma : Widget.CodeWithInfos
+deriving Server.RpcEncodable
+
 instance : ToFormat RewriteLemma where
   format lem := f! "{if lem.symm then "← " else ""}{lem.name}"
 
@@ -451,7 +455,7 @@ def checkRewriteLemma (prop : RewriteCandidate) : RequestM (RequestTask PremiseV
           return .error { prettyLemma, error := ← WithRpcRef.mk error.toMessageData }
 
 @[widget_module]
-abbrev RewriteSuggestionPanel := TacticSuggestionPanel RewriteLemma RewriteMetadata
+def RewriteSuggestionPanel := TacticSuggestionPanel RewriteLemmaWithDisplay RewriteMetadata
 
 #eval IO.println RewriteSuggestionPanel.javascript
 
@@ -476,6 +480,9 @@ where
       | .hypothesis => " (local hypotheses)"
       | .fromFile => " (lemmas from current file)"
       | .fromCache => ""
+    let premisesWithDisplay : Array RewriteLemmaWithDisplay ←
+      sec.1.mapM fun lem =>
+        return { lem with prettyLemma := ← ppExprTagged =<< mkConstWithLevelParams lem.name }
     return <details «open»={true}>
       <summary className="mv2 pointer">
         Pattern
@@ -484,7 +491,7 @@ where
       </summary>
       <RewriteSuggestionPanel
         selectionMetadata={data}
-        premises={sec.1}
+        premises={premisesWithDisplay}
         validationMethod={``checkRewriteLemma}
         range={range}
         documentUri={doc.meta.uri} />

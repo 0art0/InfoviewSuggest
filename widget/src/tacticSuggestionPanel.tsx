@@ -17,7 +17,8 @@ import {
   EditorConnection,
   RpcPtr
 } from "@leanprover/infoview";
-import React, { JSX } from "react";
+import React from "react";
+import { JSX } from "react/jsx-runtime";
 import { DocumentUri, Range, TextEdit } from "vscode-languageserver-protocol";
 
 type ExprWithCtx = RpcPtr<'ProofWidgets.ExprWithCtx'>
@@ -52,13 +53,14 @@ function stripTags<T>(text: TaggedText<T>): string {
 }
 
 /** A *premise* is the name of a local hypothesis or a result from the library
- *  that can be used in a proof.
+ *  that can be used in a proof, together with a pretty-printed form for rendering.
  * 
- *  HACK: While the interface defined in this file has only a single field containing the name of the result,
+ *  HACK: While the interface defined in this file has only a two fields containing the name of the result and its pretty-printed form,
  *  the compiled JavaScript code with all types erased will work equally well for any interface that extends this one. 
  */
 interface Premise {
   name: Name
+  prettyLemma: CodeWithInfos,
 }
 
 /** The props for the tactic suggestions panel. */
@@ -81,16 +83,13 @@ interface PremiseWithMetadata {
 }
 
 interface ValidationSuccessResult {
-
   tactic: string,
   replacementText: CodeWithInfos,
   extraGoals: CodeWithInfos[],
-  prettyLemma: CodeWithInfos,
   inFilteredView: boolean // TODO: integrate this into the code
 }
 
 interface ValidationErrorResult {
-  prettyLemma: CodeWithInfos,
   error: MessageData
 }
 
@@ -103,10 +102,25 @@ type PremiseValidationResult =
   { kind: "error", result: ValidationErrorResult } |
   { kind: "reset", result: ValidationResetResult }
 
+type PremiseWithValidationResult =
+  { kind: "success", result: (Premise & ValidationSuccessResult) } |
+  { kind: "error", result: (Premise & ValidationErrorResult) } |
+  { kind: "reset", result: ValidationResetResult }
+
 interface TacticSuggestionPanelState {
-  successes: ValidationSuccessResult[],
-  failures: ValidationErrorResult[],
+  successes: (Premise & ValidationSuccessResult)[],
+  failures: (Premise & ValidationErrorResult)[],
   pending: Premise[]
+}
+
+function addPremiseToValidationResult(premise: Premise, result: PremiseValidationResult): PremiseWithValidationResult {
+  if (result.kind === "success") {
+    return { kind: "success", result: { ...result.result, ...premise } };
+  } else if (result.kind === "error") {
+    return { kind: "error", result: { ...result.result, ...premise } };
+  } else {
+    return result;
+  }
 }
 
 /** Whether one suggestion is more relevant than another, and therefore should be prioritized in the list of suggestions.
@@ -133,9 +147,9 @@ function isEquivalent(result: ValidationSuccessResult, reference: ValidationSucc
 
 /** From a *sorted* list of validation success results, 
  * remove suggestions that are equivalent to others in the list. */
-function eraseEquivalentEntries(results: ValidationSuccessResult[]): ValidationSuccessResult[] {
-  const filtered: ValidationSuccessResult[] = [];
-  let previous: ValidationSuccessResult | undefined = undefined;
+function eraseEquivalentEntries(results: (Premise & ValidationSuccessResult)[]): (Premise & ValidationSuccessResult)[] {
+  const filtered: (Premise & ValidationSuccessResult)[] = [];
+  let previous: (Premise & ValidationSuccessResult) | undefined = undefined;
 
   for (let i = 0; i < results.length; i++) {
     const current = results[i];
@@ -149,7 +163,7 @@ function eraseEquivalentEntries(results: ValidationSuccessResult[]): ValidationS
   return filtered;
 }
 
-function reducer(state: TacticSuggestionPanelState, action: PremiseValidationResult): TacticSuggestionPanelState {
+function reducer(state: TacticSuggestionPanelState, action: PremiseWithValidationResult): TacticSuggestionPanelState {
   if (action.kind === "success") {
     const successes = state.successes;
     const index = successes.findIndex(r => isMoreRelevantResult(action.result, r));
@@ -174,7 +188,7 @@ async function applyEdit(edit: TextEdit, documentUri: DocumentUri, ec: EditorCon
   })
 }
 
-function renderSuccessResult(ec: EditorConnection, result: ValidationSuccessResult, showName: boolean, range: Range, documentUri: DocumentUri): JSX.Element {
+function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationSuccessResult, showName: boolean, range: Range, documentUri: DocumentUri): JSX.Element {
   // const [isHovered, setIsHovered] = React.useState(false);
 
   const handleTryThis = async () => {
@@ -294,7 +308,7 @@ function renderSuccessResult(ec: EditorConnection, result: ValidationSuccessResu
   );
 }
 
-function renderErrorResult(result: ValidationErrorResult): JSX.Element {
+function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element {
   return (
     <div style={{
       padding: '12px 16px',
@@ -356,7 +370,7 @@ function renderPendingResult(result: Premise): JSX.Element {
         color: '#57606a',
         fontFamily: 'monospace',
       }}>
-        {result.name}
+        <InteractiveCode fmt={result.prettyLemma} />
       </span>
       <style>{`
         @keyframes spin {
@@ -370,10 +384,10 @@ function renderPendingResult(result: Premise): JSX.Element {
 
 function renderValidationState(ec: EditorConnection, state: TacticSuggestionPanelState, range: Range, documentUri: DocumentUri): JSX.Element {
   // const { showFailed, showPending, filterResults, showNames } = React.useContext(ValidationOptionsContext);
-  const showFailed = false;
+  const showFailed = true;
   const showPending = true;
   const filterResults = true;
-  const showNames = false;
+  const showNames = true;
 
   const successes = filterResults ? eraseEquivalentEntries(state.successes) : state.successes;
 
@@ -415,10 +429,10 @@ export default function TacticSuggestionsPanel(props: TacticSuggestionPanelProps
     for (let i = 0; i < props.premises.length; i++) {
       const premise = props.premises[i];
       const result = await rs.call<PremiseWithMetadata, PremiseValidationResult>(props.validationMethod, { selectionMetadata: props.selectionMetadata, premise });
-      // if (r.current !== id) {
-      //   return;
-      // }
-      updateState(result);
+      if (r.current !== id) {
+        return;
+      }
+      updateState(addPremiseToValidationResult(premise, result));
     }
   }
 

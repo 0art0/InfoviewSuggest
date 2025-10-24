@@ -30,6 +30,17 @@ function stripTags(text) {
         throw new Error("Invalid `TaggedText` structure");
     }
 }
+function addPremiseToValidationResult(premise, result) {
+    if (result.kind === "success") {
+        return { kind: "success", result: { ...result.result, ...premise } };
+    }
+    else if (result.kind === "error") {
+        return { kind: "error", result: { ...result.result, ...premise } };
+    }
+    else {
+        return result;
+    }
+}
 /** Whether one suggestion is more relevant than another, and therefore should be prioritized in the list of suggestions.
  * The ranking is according to
  * - the number of side goals (the fewer goals the better)
@@ -196,7 +207,7 @@ function renderPendingResult(result) {
                     fontSize: '14px',
                     color: '#57606a',
                     fontFamily: 'monospace',
-                }, children: result.name }), _jsx("style", { children: `
+                }, children: _jsx(InteractiveCode, { fmt: result.prettyLemma }) }), _jsx("style", { children: `
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
@@ -205,10 +216,10 @@ function renderPendingResult(result) {
 }
 function renderValidationState(ec, state, range, documentUri) {
     // const { showFailed, showPending, filterResults, showNames } = React.useContext(ValidationOptionsContext);
-    const showFailed = false;
+    const showFailed = true;
     const showPending = true;
     const filterResults = true;
-    const showNames = false;
+    const showNames = true;
     const successes = filterResults ? eraseEquivalentEntries(state.successes) : state.successes;
     return (_jsxs("div", { children: [showPending && state.pending.map((p, i) => (_jsx("div", { children: renderPendingResult(p) }, `pending-${i}`))), showFailed && state.failures.map((f, i) => (_jsx("div", { children: renderErrorResult(f) }, `fail-${i}`))), successes.map((s, i) => (_jsx("div", { children: renderSuccessResult(ec, s, showNames, range, documentUri) }, `succ-${i}`)))] }));
 }
@@ -231,10 +242,10 @@ export default function TacticSuggestionsPanel(props) {
         for (let i = 0; i < props.premises.length; i++) {
             const premise = props.premises[i];
             const result = await rs.call(props.validationMethod, { selectionMetadata: props.selectionMetadata, premise });
-            // if (r.current !== id) {
-            //   return;
-            // }
-            updateState(result);
+            if (r.current !== id) {
+                return;
+            }
+            updateState(addPremiseToValidationResult(premise, result));
         }
     }
     React.useEffect(() => {
