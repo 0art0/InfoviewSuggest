@@ -186,6 +186,7 @@ async function applyEdit(edit: TextEdit, documentUri: DocumentUri, ec: EditorCon
       [documentUri]: [edit]
     }
   })
+  await ec.revealPosition({ ...edit.range.end, uri: documentUri });
 }
 
 function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationSuccessResult, showName: boolean, range: Range, documentUri: DocumentUri): JSX.Element {

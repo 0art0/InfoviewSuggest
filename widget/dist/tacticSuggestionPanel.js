@@ -100,6 +100,7 @@ async function applyEdit(edit, documentUri, ec) {
             [documentUri]: [edit]
         }
     });
+    await ec.revealPosition({ ...edit.range.end, uri: documentUri });
 }
 function renderSuccessResult(ec, result, showName, range, documentUri) {
     const handleTryThis = async () => {
