@@ -186,7 +186,7 @@ async function applyEdit(edit: TextEdit, documentUri: DocumentUri, ec: EditorCon
       [documentUri]: [edit]
     }
   })
-  await ec.revealPosition({ line: edit.range.end.line, character: edit.range.end.character + edit.newText.length, uri: documentUri });
+  await ec.revealPosition({ line: edit.range.start.line, character: edit.range.start.character + edit.newText.length, uri: documentUri });
 }
 
 function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationSuccessResult, showName: boolean, range: Range, documentUri: DocumentUri): JSX.Element {
