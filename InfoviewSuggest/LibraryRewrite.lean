@@ -372,11 +372,16 @@ structure RewriteInterface where
   /-- Whether the rewrite introduces new metavariables with the replacement. -/
   makesNewMVars : Bool
 
+/-- Given tactic syntax `tac` that we want to paste into the editor, return it as a string.
+This function respects the 100 character limit for long lines. -/
+def tacticPasteString (tac : TSyntax `tactic) (column : Nat) : CoreM String := do
+  return (← PrettyPrinter.ppTactic tac).pretty 100 column column
+
 /-- Construct the `RewriteInterface` from a `Rewrite`. -/
 def Rewrite.toInterface (rw : Rewrite) (name : Name ⊕ FVarId) (occ : Option Nat)
-    (loc : Option Name) (range : Lsp.Range) : MetaM RewriteInterface := do
+    (loc : Option Name) (column : Nat) : MetaM RewriteInterface := do
   let tactic ← tacticSyntax rw occ loc
-  let tactic ← tacticPasteString tactic range
+  let tactic ← tacticPasteString tactic column
   let replacementText ← ppExprTagged rw.replacement
   let mut extraGoals := #[]
   for (mvarId, bi) in rw.extraGoals do
@@ -425,7 +430,7 @@ def pattern (type : Expr) (symm : Bool) : MetaM CodeWithInfos := do
 structure RewriteMetadata where
   occ : Option Nat
   loc : Option Name
-  range : Lsp.Range
+  column : Nat
   expr : ProofWidgets.ExprWithCtx
 deriving TypeName
 
@@ -437,7 +442,7 @@ deriving RpcEncodable
 @[server_rpc_method]
 def checkRewriteLemma (prop : RewriteCandidate) : RequestM (RequestTask PremiseValidationResult) :=
   RequestM.asTask do
-    let { expr, occ, loc, range } := prop.selectionMetadata.val
+    let { expr, occ, loc, column } := prop.selectionMetadata.val
     let { name, symm } := prop.premise
     liftM <| expr.runMetaM fun expr => do
       let prettyLemma := match ← ppExprTagged (← mkConstWithLevelParams name) with
@@ -446,10 +451,11 @@ def checkRewriteLemma (prop : RewriteCandidate) : RequestM (RequestTask PremiseV
       tryCatchRuntimeEx do
           let thm ← mkConstWithFreshMVarLevels name
           let some rewrite ← checkRewrite thm expr symm |
-            return .error { prettyLemma, error := ← WithRpcRef.mk m!"The lemma {name} did not apply"}
-          let { tactic, replacement, extraGoals, makesNewMVars .. } ← rewrite.toInterface (.inl name) occ loc range
+            return .error { prettyLemma, error := ← WithRpcRef.mk m!"Lemma {name} did not apply"}
+          if ← isExplicitEq rewrite.replacement expr then
+            return .error { prettyLemma, error := ← WithRpcRef.mk m!"Lemma {name} replaced {expr} with {rewrite.replacement}, which is the same"}
+          let { tactic, replacement, extraGoals, makesNewMVars .. } ← rewrite.toInterface (.inl name) occ loc column
           let replacementText ← ppExprTagged replacement
-          -- TODO: filter on whether the rewrite is reflexive
           return .success { tactic, replacementText, extraGoals, prettyLemma, inFilteredView := !makesNewMVars }
         fun error =>
           return .error { prettyLemma, error := ← WithRpcRef.mk error.toMessageData }
@@ -533,7 +539,7 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
           ⟨props.pos, props.pos⟩
 
       let unfoldsHtml ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
-      let data ← WithRpcRef.mk { occ, loc := location, range := range, expr := ← ExprWithCtx.save subExpr }
+      let data ← WithRpcRef.mk { occ, loc := location, column := range.start.character, expr := ← ExprWithCtx.save subExpr }
       let all ← getLongList subExpr
       renderRewrites subExpr all unfoldsHtml range doc data
 
