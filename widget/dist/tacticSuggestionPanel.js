@@ -100,7 +100,7 @@ async function applyEdit(edit, documentUri, ec) {
             [documentUri]: [edit]
         }
     });
-    await ec.revealPosition({ ...edit.range.end, uri: documentUri });
+    await ec.revealPosition({ line: edit.range.end.line, character: edit.range.end.character + edit.newText.length, uri: documentUri });
 }
 function renderSuccessResult(ec, result, showName, range, documentUri) {
     const handleTryThis = async () => {
