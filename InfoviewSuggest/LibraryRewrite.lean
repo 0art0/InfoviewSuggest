@@ -451,10 +451,11 @@ def checkRewriteLemma (prop : RewriteCandidate) : RequestM (RequestTask PremiseV
       tryCatchRuntimeEx do
           let thm ← mkConstWithFreshMVarLevels name
           let some rewrite ← checkRewrite thm expr symm |
-            return .error { prettyLemma, error := ← WithRpcRef.mk m!"The lemma {name} did not apply"}
+            return .error { prettyLemma, error := ← WithRpcRef.mk m!"Lemma {name} did not apply"}
+          if ← isExplicitEq rewrite.replacement expr then
+            return .error { prettyLemma, error := ← WithRpcRef.mk m!"Lemma {name} replaced {expr} with {rewrite.replacement}, which is the same"}
           let { tactic, replacement, extraGoals, makesNewMVars .. } ← rewrite.toInterface (.inl name) occ loc column
           let replacementText ← ppExprTagged replacement
-          -- TODO: filter on whether the rewrite is reflexive
           return .success { tactic, replacementText, extraGoals, prettyLemma, inFilteredView := !makesNewMVars }
         fun error =>
           return .error { prettyLemma, error := ← WithRpcRef.mk error.toMessageData }
