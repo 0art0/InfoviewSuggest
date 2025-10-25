@@ -389,17 +389,16 @@ export default function TacticSuggestionsPanel(props) {
         r.current += 1;
         const id = r.current;
         updateState({ kind: "reset", result: { premises: props.premises } });
-        for (let i = 0; i < props.premises.length; i++) {
-            const premise = props.premises[i];
+        const promises = props.premises.map(async (premise) => {
             const result = await rs.call(props.validationMethod, { selectionMetadata: props.selectionMetadata, premise });
-            if (r.current !== id) {
+            // If a newer run started, abort processing this result
+            if (r.current !== id)
                 return;
-            }
             updateState(addPremiseToValidationResult(premise, result));
-        }
+        });
+        await Promise.all(promises);
     }
-    React.useEffect(() => {
-        e();
-    }, [rs, props.premises.map(p => p.name).join(",")]); // TODO: think about why this is necessary, and remove if it is not
+    ;
+    React.useEffect(() => { e(); }, [rs, props.premises.map(p => p.name).join(",")]); // TODO: think about why this is necessary, and remove if it is not
     return (renderValidationState(ec, state, props.range, props.documentUri));
 }
