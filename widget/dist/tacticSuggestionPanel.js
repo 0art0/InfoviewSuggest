@@ -303,7 +303,7 @@ function renderValidationState(ec, state, range, documentUri) {
     const showFailed = true;
     const showPending = true;
     const filterResults = true;
-    const showNames = true;
+    const showNames = false;
     const successes = filterResults ? eraseEquivalentEntries(state.successes) : state.successes;
     return (_jsxs("div", { style: {
             backgroundColor: 'white',

@@ -501,7 +501,7 @@ function renderValidationState(ec: EditorConnection, state: TacticSuggestionPane
   const showFailed = true;
   const showPending = true;
   const filterResults = true;
-  const showNames = true;
+  const showNames = false;
 
   const successes = filterResults ? eraseEquivalentEntries(state.successes) : state.successes;
 
