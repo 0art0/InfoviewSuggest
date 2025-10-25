@@ -203,9 +203,9 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
       display: 'flex',
       gap: '12px',
       padding: '12px',
-      backgroundColor: '#f8fafc',
+      backgroundColor: 'var(--bg-success)',
       borderRadius: '8px',
-      border: '1px solid #e2e8f0',
+      border: '1px solid var(--border-default)',
       transition: 'all 0.2s ease',
       boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
     }}>
@@ -219,27 +219,27 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
         }}>
           <button
             onClick={handleTryThis}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: '#0969da',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '13px',
-              fontWeight: '500',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              flexShrink: 0,
-              alignSelf: 'flex-start'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#0860ca';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#0969da';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: 'var(--accent-blue)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                fontSize: '13px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                flexShrink: 0,
+                alignSelf: 'flex-start'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--accent-blue-strong)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--accent-blue)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
           >
             Try this
           </button>
@@ -266,7 +266,7 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
             {result.extraGoals.map((goal, index) => (
               <div key={index} style={{
                 padding: '4px 8px',
-                backgroundColor: '#f1f5f9',
+                backgroundColor: 'var(--bg-extra)',
                 borderLeft: '2px solid var(--vscode-lean4-infoView\\.turnstile)',
                 borderRadius: '4px',
                 fontSize: '13px',
@@ -297,7 +297,7 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
           <div>
             <hr style={{
               border: 'none',
-              borderTop: '1px solid #e2e8f0',
+              borderTop: '1px solid var(--border-default)',
               margin: '12px 0 12px 0'
             }} />
             <div style={{
@@ -305,14 +305,14 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
               alignItems: 'center',
               gap: '8px',
               fontSize: '12px',
-              color: '#64748b'
+              color: 'var(--text-muted)'
             }}>
               <span style={{ 
                 fontWeight: '600',
                 textTransform: 'uppercase',
                 letterSpacing: '0.025em',
                 fontSize: '11px',
-                color: '#475569'
+                color: 'var(--text-muted)'
               }}>Lemma</span>
               <span style={{
                 flex: 1,
@@ -329,7 +329,7 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
                   border: 'none',
                   padding: '4px',
                   cursor: 'pointer',
-                  color: '#64748b',
+                  color: 'var(--text-muted)',
                   opacity: 0.7,
                   transition: 'all 0.2s ease',
                   display: 'flex',
@@ -361,8 +361,8 @@ function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element
     <div style={{
       padding: '8px 12px',
       marginBottom: '6px',
-      background: 'linear-gradient(to right, #fef2f2, #fee2e2)',
-      border: '1px solid #fecaca',
+      backgroundColor: 'var(--bg-error)',
+      border: '1px solid var(--accent-red)',
       borderRadius: '6px',
       display: 'flex',
       alignItems: 'center',
@@ -379,7 +379,7 @@ function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element
         {/* Lemma */}
         <div style={{
           fontSize: '14px',
-          color: '#991b1b',
+          color: 'var(--accent-red)',
           fontFamily: 'monospace',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -391,7 +391,7 @@ function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element
         {/* Error Message */}
         <div style={{
           fontSize: '12px',
-          color: '#7f1d1d',
+          color: 'var(--accent-red)',
           lineHeight: '1.4'
         }}>
           <InteractiveMessageData msg={result.error} />
@@ -406,7 +406,7 @@ function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element
           border: 'none',
           padding: '4px',
           cursor: 'pointer',
-          color: '#dc2626',
+          color: 'var(--accent-red)',
           opacity: 0.6,
           transition: 'opacity 0.2s ease',
           display: 'flex',
@@ -432,8 +432,8 @@ function renderPendingResult(result: Premise): JSX.Element {
     <div style={{
       padding: '8px 12px',
       marginBottom: '6px',
-      background: 'linear-gradient(to right, #fffbeb, #fef9c3)',
-      border: '1px solid #fde68a',
+      backgroundColor: 'var(--bg-pending)',
+      border: '1px solid var(--accent-yellow)',
       borderRadius: '6px',
       display: 'flex',
       alignItems: 'center',
@@ -446,7 +446,7 @@ function renderPendingResult(result: Premise): JSX.Element {
         width: '16px',
         height: '16px',
         borderRadius: '50%',
-        borderTop: '2px solid #d97706',
+        borderTop: '2px solid var(--accent-yellow)',
         borderRight: '2px solid transparent',
         animation: 'spin 0.8s linear infinite',
         flexShrink: 0
@@ -456,7 +456,7 @@ function renderPendingResult(result: Premise): JSX.Element {
       <div style={{
         flex: 1,
         fontSize: '14px',
-        color: '#92400e',
+        color: 'var(--accent-yellow)',
         fontFamily: 'monospace',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -472,8 +472,7 @@ function renderPendingResult(result: Premise): JSX.Element {
           background: 'none',
           border: 'none',
           padding: '4px',
-          cursor: 'pointer',
-          color: '#b45309',
+          color: 'var(--accent-yellow)',
           opacity: 0.6,
           transition: 'opacity 0.2s ease',
           display: 'flex',
@@ -497,28 +496,24 @@ function renderPendingResult(result: Premise): JSX.Element {
 }
 
 function renderValidationState(ec: EditorConnection, state: TacticSuggestionPanelState, range: Range, documentUri: DocumentUri): JSX.Element {
-  // const { showFailed, showPending, filterResults, showNames } = React.useContext(ValidationOptionsContext);
-  const showFailed = true;
-  const showPending = true;
-  const filterResults = true;
-  const showNames = false;
+  const filterResults = true; // TODO: get from context
 
   const successes = filterResults ? eraseEquivalentEntries(state.successes) : state.successes;
 
-return (
-  <div style={{
-    backgroundColor: 'white',
-    border: '1px solid #e1e4e8',
-    borderRadius: '8px',
-    padding: '16px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-  }}>
+  return (
+    <div style={{
+      backgroundColor: 'var(--panel-background, white)',
+      border: '1px solid var(--border-default, #e1e4e8)',
+      borderRadius: '8px',
+      padding: '16px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+    }}>
     {/* Successes Section */}
     {successes.length > 0 && (
       <div style={{ marginBottom: '16px' }}>
         {successes.map((s, i) => (
           <div key={`succ-${i}`} style={{ marginBottom: '8px' }}>
-            {renderSuccessResult(ec, s, showNames, range, documentUri)}
+            {renderSuccessResult(ec, s, !filterResults, range, documentUri)}
           </div>
         ))}
       </div>
@@ -535,10 +530,10 @@ return (
           alignItems: 'center',
           gap: '8px',
           borderRadius: '4px',
-          backgroundColor: '#fff5f5',
+          backgroundColor: 'var(--bg-error)',
           marginBottom: '8px'
         }}>
-          <span style={{ color: '#e11d48', fontSize: '16px' }}>✕</span>
+          <span style={{ color: 'var(--accent-red)', fontSize: '16px' }}>✕</span>
           <span style={{ fontWeight: 500 }}>
             Failures ({state.failures.length})
           </span>
@@ -560,11 +555,11 @@ return (
           alignItems: 'center',
           gap: '8px',
           borderRadius: '4px',
-          backgroundColor: '#fefce8',
+          backgroundColor: 'var(--bg-pending)',
           marginBottom: '8px'
         }}>
           <span style={{ 
-            color: '#ca8a04',
+            color: 'var(--accent-yellow)',
             fontSize: '16px',
             display: 'inline-block',
             animation: 'spin 2s linear infinite'
@@ -580,6 +575,22 @@ return (
     )}
 
     <style>{`
+      :root {
+        /* Theme-aware variables with sensible fallbacks */
+        --border-default: var(--vscode-editorWidget-border, #e1e4e8);
+        --panel-background: var(--vscode-editorWidget-background, white);
+        --bg-success: var(--vscode-input-background, #f8fafc);
+        --bg-error: var(--vscode-editorError-background, #fef2f2);
+        --bg-pending: var(--vscode-editorWarning-background, #fffbeb);
+        --bg-extra: var(--vscode-editorBackground, #f1f5f9);
+        --accent-blue: var(--vscode-button-background, #0969da);
+        --accent-blue-strong: #0860ca;
+        --accent-red: var(--vscode-editorError-foreground, #dc2626);
+        --accent-yellow: var(--vscode-editorWarning-foreground, #ca8a04);
+        --text-default: var(--vscode-editor-foreground, #1f2937);
+        --text-muted: var(--vscode-descriptionForeground, #6b7280);
+      }
+
       @keyframes spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
