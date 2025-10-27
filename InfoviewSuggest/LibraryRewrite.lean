@@ -376,9 +376,8 @@ structure RewriteCandidate where
 deriving RpcEncodable
 
 structure Result where
-  filtered : Html
+  filtered : Option Html
   unfiltered : Html
-  inFilteredView : Bool
   info : RewriteInfo
   pattern : CodeWithInfos
 deriving Inhabited
@@ -416,9 +415,8 @@ def Rewrite.toResult (rw : Rewrite) (name : Name ⊕ FVarId) (occ : Option Nat) 
     | .inl name => (return (← getConstInfo name).type)
     | .inr fvarId => inferType (.fvar fvarId)
   return {
-    filtered := html false
+    filtered := if !rw.isRefl && !rw.makesNewMVars then html false else none
     unfiltered := html true
-    inFilteredView := !rw.isRefl && !rw.makesNewMVars
     info := ← rw.toInfo (match name with | .inl name => name | .inr fvarId => fvarId.name)
     pattern := ← pattern lemmaType rw.symm
   }
@@ -505,13 +503,15 @@ def updateWidgetState (ctx : WidgetContext) : StateRefT Bool MetaM Unit := do
     for t in s.pending do
       if ← IO.hasFinished t then
         let .ok (some result) := t.get | pure ()
-        if let some idx ← results.findIdxM? (·.info.isDuplicate result.info) then
+        set true
+        if let some idx ← findDuplicate result results then
           if result.info.lt results[idx]!.info then
-            results := results.set! idx result
-            set true
+            results := results.modify idx ({ · with filtered := none })
+            results := results.binInsert (lt := (·.info.lt ·.info)) result
+          else
+            results := results.binInsert (lt := (·.info.lt ·.info)) { result with filtered := none }
         else
-          results := results.push result
-          set true
+          results := results.binInsert (lt := (·.info.lt ·.info)) result
       else
         remaining := remaining.push t
     return { s with
@@ -519,6 +519,14 @@ def updateWidgetState (ctx : WidgetContext) : StateRefT Bool MetaM Unit := do
       results := results.insertionSort (lt := (·.info.lt ·.info))
     }
   ctx.state.set s
+where
+  /-- Check if there is already a duplicate of `result` in `results`,
+  for which both appear in the filtered view. -/
+  findDuplicate (result : Result) (results : Array Result) : MetaM (Option Nat) := do
+    unless result.filtered.isSome do
+      return none
+    results.findIdxM? fun res =>
+      pure res.filtered.isSome <&&> res.info.isDuplicate result.info
 
 def renderWidget (ctx : WidgetContext) : IO Html := do
   return <FilterDetails
@@ -555,19 +563,19 @@ where
   /-- Render the list of rewrite results in one section. -/
   renderSectionCore (filter : Bool) (sec : Array Result) : Html :=
     .element "ul" #[("style", json% { "padding-left" : "30px"})] <|
-      sec.map fun result => if filter then result.filtered else result.unfiltered
+      if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
 partial def waitAndUpdate (ctx : WidgetContext) : MetaM IncrementalResult := do
-  if ← IO.checkCanceled then return { html := .text "this function was cancelled", refresh := false }
+  if ← IO.checkCanceled then return { html := .text "This function was cancelled", refresh := false }
   let s ← ctx.state.get
   if s.all (·.pending.isEmpty) then
-    return { html := ← renderWidget ctx, refresh := false}
+    return { html := ← renderWidget ctx, refresh := false }
   if ← liftM <| s.anyM (·.pending.anyM IO.hasFinished) then
     let ((), anyUpdate) ← (updateWidgetState ctx).run false
     if anyUpdate then
-      return { html := ← renderWidget ctx, refresh := true}
-  IO.sleep 100 -- to avoid wasting too much computation, we wait a bit before we try again
+      return { html := ← renderWidget ctx, refresh := true }
+  IO.sleep 50 -- to avoid wasting computation, we wait a bit before we try again
   waitAndUpdate ctx
 
 
