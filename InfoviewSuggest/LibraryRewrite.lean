@@ -449,10 +449,13 @@ structure WidgetContext where
   rewriteTarget : CodeWithInfos
   prefix? : Option Html
   state : IO.Ref WidgetState
+
+structure WidgetContextTask where
+  task : Task (Except IO.Error (WidgetContext ⊕ Html))
 deriving TypeName
 
 structure WidgetStateProps where
-  ctx : WithRpcRef WidgetContext
+  ctx : WithRpcRef WidgetContextTask
 deriving RpcEncodable
 
 structure RefreshPanelProps (α : Type) [i : TypeName α] where
@@ -471,7 +474,7 @@ def RefreshPanel (α : Type) [TypeName α] : Component (RefreshPanelProps α) wh
 
 
 @[widget_module]
-def RewritePanel := RefreshPanel WidgetContext
+def RewritePanel := RefreshPanel WidgetContextTask
 
 def initializeWidgetState (e : Expr) (expr : ExprWithCtx) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
     (loc : Option Name) (column : Nat) (exceptFVarId : Option FVarId) : MetaM WidgetState := do
@@ -582,8 +585,13 @@ partial def waitAndUpdate (ctx : WidgetContext) : MetaM IncrementalResult := do
 @[server_rpc_method]
 def renderIncrementally (props : WidgetStateProps) : RequestM (RequestTask IncrementalResult) := do
   RequestM.asTask do
-    let s := props.ctx.val
-    s.expr.runMetaM fun _ => try waitAndUpdate s catch e => return { html := .text (← e.toMessageData.toString), refresh := false }
+    match props.ctx.val.task.get with
+    | .error e => return { html := .text e.toString, refresh := false } -- TODO: nicer error messages
+    | .ok (.inr html) => return { html, refresh := false }
+    | .ok (.inl s) =>
+      s.expr.runMetaM fun _ =>
+        try waitAndUpdate s catch e => return { html := .text (← e.toMessageData.toString), refresh := false } -- TODO: nicer error messages
+
 
 
 structure TacticInsertionProps extends PanelWidgetProps where
@@ -602,40 +610,41 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   let some goal := props.goals[0]? | return .text "rw!?: there is no goal to solve!"
   if loc.mvarId != goal.mvarId then
     return .text "rw!?: the selected expression should be in the main goal."
-  goal.ctx.val.runMetaM {} do
-    let md ← goal.mvarId.getDecl
-    let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
-    Meta.withLCtx lctx md.localInstances do
+  let mkCtx : IO (WidgetContext ⊕ Html) :=
+    goal.ctx.val.runMetaM {} do
+      let md ← goal.mvarId.getDecl
+      let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
+      Meta.withLCtx lctx md.localInstances do
 
-      let rootExpr ← loc.rootExpr
-      let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
-        return .text "rw!?: expressions with bound variables are not yet supported"
-      unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
-        return .text <| "rw!?: the selected expression cannot be rewritten, \
-          because the motive is not type correct. \
-          This usually occurs when trying to rewrite a term that appears as a dependent argument."
-      let location ← loc.fvarId?.mapM FVarId.getUserName
+        let rootExpr ← loc.rootExpr
+        let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
+          return .inr <| .text "rw!?: expressions with bound variables are not yet supported"
+        unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
+          return .inr <| .text <| "rw!?: the selected expression cannot be rewritten, \
+            because the motive is not type correct. \
+            This usually occurs when trying to rewrite a term that appears as a dependent argument."
+        let location ← loc.fvarId?.mapM FVarId.getUserName
 
-      let range : Lsp.Range :=
-        if let .some range := props.replaceRange then
-          range
-        else
-          ⟨props.pos, props.pos⟩
+        let range : Lsp.Range :=
+          if let .some range := props.replaceRange then
+            range
+          else
+            ⟨props.pos, props.pos⟩
 
-      let unfoldsHtml ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
-      let expr ← ExprWithCtx.save subExpr
-      if ← IO.checkCanceled then return .text "This function was cancelled"
-      let state ← IO.mkRef (← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?)
-      let ctx : WidgetContext := {
-        expr
-        rewriteTarget := ← ppExprTagged subExpr
-        prefix? := unfoldsHtml
-        state
-      }
-      return <RewritePanel
-        initial={.text "rw!? is checking rewrite lemmas..."}
-        next={``renderIncrementally}
-        state={← WithRpcRef.mk ctx} />
+        let unfoldsHtml ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
+        let expr ← ExprWithCtx.save subExpr
+        if ← IO.checkCanceled then return .inr <| .text "This function was cancelled"
+        let state ← IO.mkRef (← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?)
+        return .inl {
+          expr
+          rewriteTarget := ← ppExprTagged subExpr
+          prefix? := unfoldsHtml
+          state }
+
+    return <RewritePanel
+      initial={.text "rw!? is checking rewrite lemmas..."}
+      next={``renderIncrementally}
+      state={← WithRpcRef.mk { task := ← mkCtx.asTask }} />
 
 /-- The component called by the `rw!?` tactic -/
 @[widget_module]
