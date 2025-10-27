@@ -68,15 +68,15 @@ export default function RefreshPanel(props) {
     // Repeatedly call Lean to update
     React.useEffect(() => {
         let cancelled = false;
-        async function loop() {
-            const result = await rs.call(props.next, { ctx: props.state });
+        async function loop(refresh) {
+            const result = await rs.call(props.next, refresh);
             if (cancelled)
                 return;
             setHtml(result.html);
             if (result.refresh)
-                loop();
+                loop(result.refresh);
         }
-        loop();
+        loop(props.refresh);
         return () => { cancelled = true; };
     }, []);
     return _jsx(HtmlDisplay, { html: html });

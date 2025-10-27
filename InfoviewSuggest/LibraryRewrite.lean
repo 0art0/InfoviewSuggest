@@ -461,10 +461,6 @@ structure RefreshTask where
   go : Task (Except IO.Error (Html × Option RefreshTask))
 deriving TypeName
 
-structure RefreshProps where
-  ctx : WithRpcRef RefreshTask
-  deriving RpcEncodable
-
 structure RefreshResult where
   html : Html
   refresh : Option (WithRpcRef RefreshTask)
@@ -481,9 +477,9 @@ def RefreshComponent : Component RefreshComponentProps where
   javascript := include_str ".." / "widget" / "dist" / "tacticSuggestionPanel.js"
 
 @[server_rpc_method]
-def runRefresh (props : RefreshProps) : RequestM (RequestTask RefreshResult) :=
+def runRefresh (task : WithRpcRef RefreshTask) : RequestM (RequestTask RefreshResult) :=
   RequestM.asTask do
-    match props.ctx.val.go.get with
+    match task.val.go.get with
     | .error e => throw (.ofIoError e)
     | .ok (html, go) => return { html, refresh := ← go.mapM (WithRpcRef.mk ·) }
 

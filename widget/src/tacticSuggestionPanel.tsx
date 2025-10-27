@@ -79,17 +79,15 @@ export interface RefreshPanelProps {
   /** The Lean function to call next */
   next: Name
   /** A reference to a Lean object that will be passed to `next` */
-  state: RpcPtr<''>
+  refresh: RpcPtr<''>
 }
 
 export interface IncrementalResult {
+  /** The new HTML to display */
   html : Html
-  refresh : boolean
+  refresh? : RpcPtr<''>
 }
-export interface WidgetStateProps {
-  /** A reference to a Lean object that will be passed to `next` */
-  ctx : RpcPtr<''>
-}
+
 export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
   const rs = useRpcSession()
   const [html, setHtml] = React.useState<Html>(props.initial)
@@ -97,13 +95,13 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
   // Repeatedly call Lean to update
   React.useEffect(() => {
     let cancelled = false
-    async function loop() {
-      const result = await rs.call<WidgetStateProps, IncrementalResult>(props.next, { ctx: props.state })
+    async function loop(refresh: RpcPtr<''>) {
+      const result = await rs.call<RpcPtr<''>, IncrementalResult>(props.next, refresh)
       if (cancelled) return
       setHtml(result.html)
-      if (result.refresh) loop()
+      if (result.refresh) loop(result.refresh)
     }
-    loop()
+    loop(props.refresh)
     return () => { cancelled = true }
   }, [])
   return <HtmlDisplay html={html}/>
