@@ -312,41 +312,14 @@ def getHypotheses (except : Option FVarId) : MetaM (RefinedDiscrTree (FVarId × 
   return tree.toRefinedDiscrTree
 
 /-- Return all applicable hypothesis rewrites of `e`. Similar to `getImportRewrites`. -/
-def getHypothesisRewrites (e : Expr) (except : Option FVarId) :
-    MetaM (Array (Array (Rewrite × FVarId))) := do
+def getHypothesisCandidates (e : Expr) (except : Option FVarId) :
+    MetaM (Array (Array (FVarId × Bool))) := do
   let (candidates, _) ← (← getHypotheses except).getMatch e (unify := false) (matchRootStar := true)
-  let candidates := (← MonadExcept.ofExcept candidates).flatten
-  candidates.mapM <| Array.filterMapM fun (fvarId, symm) =>
-    tryCatchRuntimeEx do
-      Option.map (·, fvarId) <$> checkRewrite (.fvar fvarId) e symm
-    fun _ =>
-      return none
-
-/-! ### Filtering out duplicate lemmas -/
-
-/-- Filter out duplicate rewrites, reflexive rewrites
-or rewrites that have metavariables in the replacement expression. -/
-@[specialize]
-def filterRewrites {α} (e : Expr) (rewrites : Array α) (replacement : α → Expr)
-    (makesNewMVars : α → Bool) : MetaM (Array α) :=
-  withNewMCtxDepth do
-  let mut filtered := #[]
-  for rw in rewrites do
-    -- exclude rewrites that introduce new metavariables into the expression
-    if makesNewMVars rw then continue
-    -- exclude a reflexive rewrite
-    if ← isExplicitEq (replacement rw) e then
-      trace[rw!?] "discarded reflexive rewrite {replacement rw}"
-      continue
-    -- exclude two identical looking rewrites
-    if ← filtered.anyM (isExplicitEq (replacement rw) <| replacement ·) then
-      trace[rw!?] "discarded duplicate rewrite {replacement rw}"
-      continue
-    filtered := filtered.push rw
-  return filtered
+  return (← MonadExcept.ofExcept candidates).flatten
 
 
 /-! ### User interface -/
+
 /-- Return the rewrite tactic that performs the rewrite. -/
 def tacticSyntax (rw : Rewrite) (occ : Option Nat) (loc : Option Name) :
     MetaM (TSyntax `tactic) := withoutModifyingMCtx do
@@ -401,32 +374,6 @@ structure RewriteCandidate where
   selectionMetadata : Server.WithRpcRef RewriteMetadata
   premise : RewriteLemma
 deriving RpcEncodable
-
--- @[server_rpc_method]
--- def checkRewriteLemma' (prop : RewriteCandidate) : RequestM (RequestTask PremiseValidationResult) :=
---   RequestM.asTask do
---     let { expr, occ, loc, column } := prop.selectionMetadata.val
---     let { name, symm } := prop.premise
---     liftM <| expr.runMetaM fun expr => do
---       let prettyLemma := match ← ppExprTagged (← mkConstWithLevelParams name) with
---         | .tag tag _ => Lean.Widget.TaggedText.tag tag (.text s!"{name}")
---         | code => code
---       tryCatchRuntimeEx do
---           let thm ← mkConstWithFreshMVarLevels name
---           let some rewrite ← checkRewrite thm expr symm |
---             return .error { prettyLemma, error := ← WithRpcRef.mk m!"Lemma {name} did not apply"}
---           if ← isExplicitEq rewrite.replacement expr then
---             return .error { prettyLemma, error := ← WithRpcRef.mk m!"Lemma {name} replaced {expr} with {rewrite.replacement}, which is the same"}
---           let { tactic, replacement, extraGoals, makesNewMVars .. } ← rewrite.toInterface (.inl name) occ loc column
---           let replacementText ← ppExprTagged replacement
---           return .success { tactic, replacementText, extraGoals, prettyLemma, inFilteredView := !makesNewMVars }
---         fun error =>
---           return .error { prettyLemma, error := ← WithRpcRef.mk error.toMessageData }
-
--- @[widget_module]
--- def RewriteSuggestionPanel := TacticSuggestionPanel RewriteLemmaWithDisplay RewriteMetadata
-
--- #eval IO.println RewriteSuggestionPanel.javascript
 
 structure Result where
   filtered : Html
@@ -484,6 +431,14 @@ def generateSuggestion (expr : ExprWithCtx) (lem : RewriteLemma) (occ : Option N
     let some rewrite ← checkRewrite thm expr lem.symm | return none
     some <$> rewrite.toResult (.inl lem.name) occ doc range loc column
 
+/-- The same as `generateSuggestion`, but for local hypotheses. -/
+def generateLocalSuggestion (expr : ExprWithCtx) (lem : FVarId × Bool) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
+    (loc : Option Name) (column : Nat) : IO (Option Result) := do
+  expr.runMetaM fun expr => withNewMCtxDepth do
+    let some rewrite ← checkRewrite (.fvar lem.1) expr lem.2 | return none
+    some <$> rewrite.toResult (.inr lem.1) occ doc range loc column
+
+
 structure SectionState where
   kind : Kind
   results : Array Result
@@ -520,12 +475,23 @@ def RefreshPanel (α : Type) [TypeName α] : Component (RefreshPanelProps α) wh
 @[widget_module]
 def RewritePanel := RefreshPanel WidgetContext
 
-def initializeWidgetState (candidates : Array (Array RewriteLemma × Kind)) (expr : ExprWithCtx) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
-    (loc : Option Name) (column : Nat) : BaseIO WidgetState :=
-  candidates.mapM fun (candidates, kind) => do
-    let pending ← candidates.mapM fun lem =>
-      IO.asTask (generateSuggestion expr lem occ doc range loc column)
-    return { kind, results := #[], pending }
+def initializeWidgetState (e : Expr) (expr : ExprWithCtx) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
+    (loc : Option Name) (column : Nat) (exceptFVarId : Option FVarId) : MetaM WidgetState := do
+  let mut sections := #[]
+
+  for candidates in ← getHypothesisCandidates e exceptFVarId do
+    let pending ← candidates.mapM (IO.asTask  <| generateLocalSuggestion expr · occ doc range loc column)
+    sections := sections.push { kind := .hypothesis, results := #[], pending }
+
+  for candidates in ← getModuleCandidates e do
+    let pending ← candidates.mapM (IO.asTask  <| generateSuggestion expr · occ doc range loc column)
+    sections := sections.push { kind := .fromFile, results := #[], pending }
+
+  for candidates in ← getImportCandidates e do
+    let pending ← candidates.mapM (IO.asTask <| generateSuggestion expr · occ doc range loc column)
+    sections := sections.push { kind := .fromCache, results := #[], pending }
+
+  return sections
 
 /-- Look a all of the pending `Task`s and if any of them gave a result, add this to the state. -/
 def updateWidgetState (ctx : WidgetContext) : StateRefT Bool MetaM Unit := do
@@ -649,10 +615,9 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
           ⟨props.pos, props.pos⟩
 
       let unfoldsHtml ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
-      -- let data ← WithRpcRef.mk { occ, loc := location, column := range.start.character, expr := ← ExprWithCtx.save subExpr }
-      let candidates ← getLongList subExpr
       let expr ← ExprWithCtx.save subExpr
-      let state ← IO.mkRef (← initializeWidgetState candidates expr occ doc range location range.start.character)
+      if ← IO.checkCanceled then return .text "This function was cancelled"
+      let state ← IO.mkRef (← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?)
       let ctx : WidgetContext := {
         expr
         rewriteTarget := ← ppExprTagged subExpr
