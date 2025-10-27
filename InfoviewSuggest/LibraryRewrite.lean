@@ -363,18 +363,6 @@ def pattern (type : Expr) (symm : Bool) : MetaM CodeWithInfos := do
     let some (lhs, rhs) := eqOrIff? e | throwError "Expected equation, not {indentExpr e}"
     ppExprTagged <| if symm then rhs else lhs
 
-structure RewriteMetadata where
-  occ : Option Nat
-  loc : Option Name
-  column : Nat
-  expr : ProofWidgets.ExprWithCtx
-deriving TypeName
-
-structure RewriteCandidate where
-  selectionMetadata : Server.WithRpcRef RewriteMetadata
-  premise : RewriteLemma
-deriving RpcEncodable
-
 structure Result where
   filtered : Option Html
   unfiltered : Html
@@ -444,37 +432,35 @@ structure SectionState where
 
 abbrev WidgetState := Array SectionState
 
-structure WidgetContext where
-  expr : ExprWithCtx
-  rewriteTarget : CodeWithInfos
-  prefix? : Option Html
-  state : IO.Ref WidgetState
-
-structure WidgetContextTask where
-  task : Task (Except IO.Error (WidgetContext ⊕ Html))
+structure RefreshTask where
+  go : Task (Html × Option RefreshTask)
 deriving TypeName
 
-structure WidgetStateProps where
-  ctx : WithRpcRef WidgetContextTask
-deriving RpcEncodable
+structure RefreshProps where
+  ctx : WithRpcRef RefreshTask
+  deriving RpcEncodable
 
-structure RefreshPanelProps (α : Type) [i : TypeName α] where
+structure RefreshResult where
+  html : Html
+  refresh : Option (WithRpcRef RefreshTask)
+  deriving RpcEncodable
+
+structure RefreshComponentProps where
   initial : Html
   next : Name
-  state : WithRpcRef α
+  refresh : WithRpcRef RefreshTask
 deriving RpcEncodable
-
-structure IncrementalResult where
-  html : Html
-  refresh : Bool
-deriving RpcEncodable
-
-def RefreshPanel (α : Type) [TypeName α] : Component (RefreshPanelProps α) where
-  javascript := include_str ".." / "widget" / "dist" / "tacticSuggestionPanel.js"
-
 
 @[widget_module]
-def RewritePanel := RefreshPanel WidgetContextTask
+def RefreshComponent : Component RefreshComponentProps where
+  javascript := include_str ".." / "widget" / "dist" / "tacticSuggestionPanel.js"
+
+@[server_rpc_method]
+def runRefresh (props : RefreshProps) : RequestM (RequestTask RefreshResult) :=
+  RequestM.asTask do
+    let (html, go) := props.ctx.val.go.get
+    return { html, refresh := ← go.mapM (WithRpcRef.mk ·) }
+
 
 def initializeWidgetState (e : Expr) (expr : ExprWithCtx) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
     (loc : Option Name) (column : Nat) (exceptFVarId : Option FVarId) : MetaM WidgetState := do
@@ -495,12 +481,10 @@ def initializeWidgetState (e : Expr) (expr : ExprWithCtx) (occ : Option Nat) (do
   return sections
 
 /-- Look a all of the pending `Task`s and if any of them gave a result, add this to the state. -/
-def updateWidgetState (ctx : WidgetContext) : StateRefT Bool MetaM Unit := do
-  let s ← ctx.state.get
-  unless ← liftM <| s.anyM (·.pending.anyM IO.hasFinished) do
-    return
-  ctx.state.set {}
-  let s ← s.mapM fun s => do
+def updateWidgetState (state : WidgetState) : StateRefT Bool MetaM WidgetState := do
+  unless ← liftM <| state.anyM (·.pending.anyM IO.hasFinished) do
+    return state
+  state.mapM fun s => do
     let mut remaining := #[]
     let mut results := s.results
     for t in s.pending do
@@ -521,7 +505,6 @@ def updateWidgetState (ctx : WidgetContext) : StateRefT Bool MetaM Unit := do
       pending := remaining
       results := results.insertionSort (lt := (·.info.lt ·.info))
     }
-  ctx.state.set s
 where
   /-- Check if there is already a duplicate of `result` in `results`,
   for which both appear in the filtered view. -/
@@ -531,21 +514,21 @@ where
     results.findIdxM? fun res =>
       pure res.filtered.isSome <&&> res.info.isDuplicate result.info
 
-def renderWidget (ctx : WidgetContext) : IO Html := do
+def renderWidget (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : IO Html := do
   return <FilterDetails
     summary={.text "Rewrite suggestions:"}
-    all={← render false ctx}
-    filtered={← render true ctx}
+    all={← render false state unfolds? rewriteTarget}
+    filtered={← render true state unfolds? rewriteTarget}
     initiallyFiltered={true} />
 where
   /-- Render all of the sections of rewrite results -/
-  render (filter : Bool) (s : WidgetContext) : IO Html := do
-    let htmls := (← ctx.state.get).filterMap (renderSection filter)
-    let htmls := match s.prefix? with
+  render (filter : Bool) (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : IO Html := do
+    let htmls := state.filterMap (renderSection filter)
+    let htmls := match unfolds? with
       | some html => #[html] ++ htmls
       | none => htmls
     if htmls.isEmpty then
-      return <p> No rewrites found for <InteractiveCode fmt={s.rewriteTarget}/> </p>
+      return <p> No rewrites found for <InteractiveCode fmt={rewriteTarget}/> </p>
     else
       return .element "div" #[("style", json% {"marginLeft" : "4px"})] htmls
 
@@ -568,30 +551,21 @@ where
     .element "ul" #[("style", json% { "padding-left" : "30px"})] <|
       if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
 
+
+def MetaMAsTask (x : MetaM (Html × Option RefreshTask)) : MetaM (Task (Html × Option RefreshTask)) :=
+  fun a b c d => BaseIO.asTask do match ← (x a b c d).toBaseIO with | .ok s => pure s | .error e => pure (.text (← e.toMessageData.toString), none)
+
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
-partial def waitAndUpdate (ctx : WidgetContext) : MetaM IncrementalResult := do
-  if ← IO.checkCanceled then return { html := .text "This function was cancelled", refresh := false }
-  let s ← ctx.state.get
-  if s.all (·.pending.isEmpty) then
-    return { html := ← renderWidget ctx, refresh := false }
-  if ← liftM <| s.anyM (·.pending.anyM IO.hasFinished) then
-    let ((), anyUpdate) ← (updateWidgetState ctx).run false
-    if anyUpdate then
-      return { html := ← renderWidget ctx, refresh := true }
+partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : MetaM (Html × Option RefreshTask) := do
+  if ← IO.checkCanceled then return (.text "This function was cancelled", none)
+  if state.all (·.pending.isEmpty) then
+    return (← renderWidget state unfolds? rewriteTarget, none)
+  let state := state
+  let (state, anyUpdate) ← (updateWidgetState state).run false
+  if anyUpdate then
+    return (← renderWidget state unfolds? rewriteTarget, some { go := ← MetaMAsTask (waitAndUpdate state unfolds? rewriteTarget) })
   IO.sleep 50 -- to avoid wasting computation, we wait a bit before we try again
-  waitAndUpdate ctx
-
-
-@[server_rpc_method]
-def renderIncrementally (props : WidgetStateProps) : RequestM (RequestTask IncrementalResult) := do
-  RequestM.asTask do
-    match props.ctx.val.task.get with
-    | .error e => return { html := .text e.toString, refresh := false } -- TODO: nicer error messages
-    | .ok (.inr html) => return { html, refresh := false }
-    | .ok (.inl s) =>
-      s.expr.runMetaM fun _ =>
-        try waitAndUpdate s catch e => return { html := .text (← e.toMessageData.toString), refresh := false } -- TODO: nicer error messages
-
+  waitAndUpdate state unfolds? rewriteTarget
 
 
 structure TacticInsertionProps extends PanelWidgetProps where
@@ -604,13 +578,15 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   RequestM.asTask do
   let doc ← RequestM.readDoc
   let some loc := props.selectedLocations.back? |
-    return .text "rw!?: Please shift-click an expression."
+    return .text "rw!?: Please shift-click an expression you would like to rewrite."
   if loc.loc matches .hypValue .. then
     return .text "rw!?: cannot rewrite in the value of a let variable."
   let some goal := props.goals[0]? | return .text "rw!?: there is no goal to solve!"
   if loc.mvarId != goal.mvarId then
     return .text "rw!?: the selected expression should be in the main goal."
-  let mkCtx : IO (WidgetContext ⊕ Html) :=
+  let go : Task (Html × Option RefreshTask) ← BaseIO.asTask do
+    (fun | .error e => (Html.text e.toString, none) | .ok s => s) <$>
+    EIO.toBaseIO do
     goal.ctx.val.runMetaM {} do
       let md ← goal.mvarId.getDecl
       let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
@@ -618,11 +594,11 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
 
         let rootExpr ← loc.rootExpr
         let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
-          return .inr <| .text "rw!?: expressions with bound variables are not yet supported"
+          return (.text "rw!?: expressions with bound variables are not yet supported", none)
         unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
-          return .inr <| .text <| "rw!?: the selected expression cannot be rewritten, \
+          return (.text <| "rw!?: the selected expression cannot be rewritten, \
             because the motive is not type correct. \
-            This usually occurs when trying to rewrite a term that appears as a dependent argument."
+            This usually occurs when trying to rewrite a term that appears as a dependent argument.", none)
         let location ← loc.fvarId?.mapM FVarId.getUserName
 
         let range : Lsp.Range :=
@@ -631,20 +607,16 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
           else
             ⟨props.pos, props.pos⟩
 
-        let unfoldsHtml ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
+        let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
         let expr ← ExprWithCtx.save subExpr
-        if ← IO.checkCanceled then return .inr <| .text "This function was cancelled"
-        let state ← IO.mkRef (← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?)
-        return .inl {
-          expr
-          rewriteTarget := ← ppExprTagged subExpr
-          prefix? := unfoldsHtml
-          state }
+        if ← IO.checkCanceled then return (.text "This function was cancelled", none)
+        let state ← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?
+        waitAndUpdate state unfolds? (← ppExprTagged subExpr)
 
-    return <RewritePanel
-      initial={.text "rw!? is checking rewrite lemmas..."}
-      next={``renderIncrementally}
-      state={← WithRpcRef.mk { task := ← mkCtx.asTask }} />
+  return <RefreshComponent
+    initial={.text "rw!? is searching for rewrite lemmas..."}
+    next={``runRefresh}
+    refresh={ ← WithRpcRef.mk { go } } />
 
 /-- The component called by the `rw!?` tactic -/
 @[widget_module]
