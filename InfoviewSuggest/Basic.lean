@@ -1,8 +1,8 @@
 import InfoviewSuggest.LibraryRewrite
+import Mathlib.Tactic
 
-#eval IO.println InfoviewSuggest.LibraryRewrite.RewriteSuggestionPanel.javascript
+example : 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 = 2 := by
+  rw!?
 
-show_panel_widgets [InfoviewSuggest.LibraryRewrite.LibraryRewriteComponent]
-
-example : 1 + 1 = 2 := by
-  sorry
+example : Function.Surjective fun x => x + 1 := by
+  rw!?
