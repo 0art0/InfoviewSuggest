@@ -569,13 +569,15 @@ where
       if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
-partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : MetaM (Option Html × Option RefreshTask) := do
-  if ← IO.checkCanceled then return (Html.text "This function was cancelled", none)
+partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : MetaM RefreshResult := do
+  if ← IO.checkCanceled then return .last <| .text "This function was cancelled"
   if state.sections.all (·.pending.isEmpty) then
-    return (← renderWidget state unfolds? rewriteTarget, none)
+    return .last <| ← renderWidget state unfolds? rewriteTarget
   let (state, anyUpdate) ← (updateWidgetState state).run false
   if anyUpdate then
-    return (← renderWidget state unfolds? rewriteTarget, ← RefreshTask.ofMetaM (waitAndUpdate state unfolds? rewriteTarget))
+    return .cont
+      (← renderWidget state unfolds? rewriteTarget)
+      (← RefreshTask.ofMetaM (waitAndUpdate state unfolds? rewriteTarget))
   IO.sleep 50 -- to avoid wasting computation, we wait a bit before we try again
   waitAndUpdate state unfolds? rewriteTarget
 
@@ -603,11 +605,11 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
 
       let rootExpr ← loc.rootExpr
       let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
-        return (Html.text "rw!?: expressions with bound variables are not yet supported", none)
+        return .last <| .text "rw!?: expressions with bound variables are not yet supported"
       unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
-        return (Html.text <| "rw!?: the selected expression cannot be rewritten, \
+        return .last <| .text <| "rw!?: the selected expression cannot be rewritten, \
           because the motive is not type correct. \
-          This usually occurs when trying to rewrite a term that appears as a dependent argument.", none)
+          This usually occurs when trying to rewrite a term that appears as a dependent argument."
       let location ← loc.fvarId?.mapM FVarId.getUserName
 
       let range : Lsp.Range :=
@@ -616,15 +618,14 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
         else
           ⟨props.pos, props.pos⟩
 
-      let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
       let expr ← ExprWithCtx.save subExpr
-      if ← IO.checkCanceled then return (Html.text "This function was cancelled", none)
+      if ← IO.checkCanceled then return .last <| .text "This function was cancelled"
       let state ← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?
+      let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
       waitAndUpdate state unfolds? (← ppExprTagged subExpr)
 
   return <RefreshComponent
     initial={.text "rw!? is searching for rewrite lemmas..."}
-    next={``runRefresh}
     refresh={ ← WithRpcRef.mk task } />
 
 /-- The component called by the `rw!?` tactic -/

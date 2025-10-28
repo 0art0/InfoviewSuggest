@@ -94,10 +94,12 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
   React.useEffect(() => {
     let cancelled = false
     async function loop(refresh: RpcPtr<''>) {
-      const result = await rs.call<RpcPtr<''>, IncrementalResult>("ProofWidgets.runRefresh", refresh)
-      if (cancelled) return
-      if (result.html) setHtml(result.html)
-      if (result.refresh) loop(result.refresh)
+        const result = await rs.call<RpcPtr<''>, IncrementalResult>("ProofWidgets.runRefresh", refresh)
+        if (cancelled) return
+        if (result.html) {
+            setHtml(result.html)
+            if (result.refresh) loop(result.refresh)
+        }
     }
     loop(props.refresh)
     return () => { cancelled = true }
