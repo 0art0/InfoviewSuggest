@@ -76,15 +76,13 @@ function HtmlDisplay({html} : {html: Html}): JSX.Element {
 export interface RefreshPanelProps {
   /** The initial HTML to display */
   initial: Html
-  /** The Lean function to call next */
-  next: Name
-  /** A reference to a Lean object that will be passed to `next` */
+  /** A Lean task for iteratively refreshing the HTML display */
   refresh: RpcPtr<''>
 }
 
 export interface IncrementalResult {
   /** The new HTML to display */
-  html : Html
+  html? : Html
   refresh? : RpcPtr<''>
 }
 
@@ -96,9 +94,9 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
   React.useEffect(() => {
     let cancelled = false
     async function loop(refresh: RpcPtr<''>) {
-      const result = await rs.call<RpcPtr<''>, IncrementalResult>(props.next, refresh)
+      const result = await rs.call<RpcPtr<''>, IncrementalResult>("ProofWidgets.runRefresh", refresh)
       if (cancelled) return
-      setHtml(result.html)
+      if (result.html) setHtml(result.html)
       if (result.refresh) loop(result.refresh)
     }
     loop(props.refresh)

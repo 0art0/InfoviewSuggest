@@ -69,10 +69,11 @@ export default function RefreshPanel(props) {
     React.useEffect(() => {
         let cancelled = false;
         async function loop(refresh) {
-            const result = await rs.call(props.next, refresh);
+            const result = await rs.call("ProofWidgets.runRefresh", refresh);
             if (cancelled)
                 return;
-            setHtml(result.html);
+            if (result.html)
+                setHtml(result.html);
             if (result.refresh)
                 loop(result.refresh);
         }

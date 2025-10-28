@@ -5,7 +5,7 @@ Authors: Jovan Gerbscheid, Anand Rao
 -/
 import Mathlib.Lean.Meta.RefinedDiscrTree
 import Mathlib.Tactic.Widget.InteractiveUnfold
-import ProofWidgets
+import InfoviewSuggest.RefreshComponent
 
 /-!
 # Point & click library rewriting
@@ -157,7 +157,7 @@ def addLocalRewriteEntry (decl : LocalDecl) :
 
 private abbrev ExtState := IO.Ref (Option (RefinedDiscrTree RewriteLemma))
 
-private builtin_initialize ExtState.default : ExtState ←
+private initialize ExtState.default : ExtState ←
   IO.mkRef none
 
 private instance : Inhabited ExtState where
@@ -416,11 +416,11 @@ def Rewrite.toResult (rw : Rewrite) (name : Name ⊕ FVarId) (occ : Option Nat) 
 def generateSuggestion (expr : ExprWithCtx) (lem : RewriteLemma) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
     (loc : Option Name) (column : Nat) : IO (Except Html <| Option Result) := do
   expr.runMetaM fun expr =>
-    tryCatchRuntimeEx (.ok <$> do
-      withNewMCtxDepth do
-      let thm ← mkConstWithFreshMVarLevels lem.name
-      let some rewrite ← checkRewrite thm expr lem.symm | return none
-      some <$> rewrite.toResult (.inl lem.name) occ doc range loc column)
+    tryCatchRuntimeEx (.ok <$>
+      withCurrHeartbeats do withNewMCtxDepth do
+        let thm ← mkConstWithFreshMVarLevels lem.name
+        let some rewrite ← checkRewrite thm expr lem.symm | return none
+        some <$> rewrite.toResult (.inl lem.name) occ doc range loc column)
     fun e => do
       return .error
         <li>
@@ -434,10 +434,10 @@ def generateSuggestion (expr : ExprWithCtx) (lem : RewriteLemma) (occ : Option N
 def generateLocalSuggestion (expr : ExprWithCtx) (lem : FVarId × Bool) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
     (loc : Option Name) (column : Nat) : IO (Except Html <| Option Result) := do
   expr.runMetaM fun expr =>
-    tryCatchRuntimeEx (.ok <$> do
-      withNewMCtxDepth do
-      let some rewrite ← checkRewrite (.fvar lem.1) expr lem.2 | return none
-      some <$> rewrite.toResult (.inr lem.1) occ doc range loc column)
+    tryCatchRuntimeEx (.ok <$>
+      withCurrHeartbeats do withNewMCtxDepth do
+        let some rewrite ← checkRewrite (.fvar lem.1) expr lem.2 | return none
+        some <$> rewrite.toResult (.inr lem.1) occ doc range loc column)
     fun e => do
       return .error
         <li>
@@ -456,32 +456,6 @@ structure WidgetState where
   sections : Array SectionState
   exceptions : Array Html
 
-
-structure RefreshTask where
-  go : Task (Except IO.Error (Html × Option RefreshTask))
-deriving TypeName
-
-structure RefreshResult where
-  html : Html
-  refresh : Option (WithRpcRef RefreshTask)
-  deriving RpcEncodable
-
-structure RefreshComponentProps where
-  initial : Html
-  next : Name
-  refresh : WithRpcRef RefreshTask
-deriving RpcEncodable
-
-@[widget_module]
-def RefreshComponent : Component RefreshComponentProps where
-  javascript := include_str ".." / "widget" / "dist" / "tacticSuggestionPanel.js"
-
-@[server_rpc_method]
-def runRefresh (task : WithRpcRef RefreshTask) : RequestM (RequestTask RefreshResult) :=
-  RequestM.asTask do
-    match task.val.go.get with
-    | .error e => throw (.ofIoError e)
-    | .ok (html, go) => return { html, refresh := ← go.mapM (WithRpcRef.mk ·) }
 
 
 def initializeWidgetState (e : Expr) (expr : ExprWithCtx) (occ : Option Nat) (doc : FileWorker.EditableDocument) (range : Lsp.Range)
@@ -594,18 +568,14 @@ where
     .element "ul" #[("style", json% { "padding-left" : "30px"})] <|
       if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
 
-def MetaMAsTask (x : MetaM (Html × Option RefreshTask)) : MetaM (Task (Except IO.Error (Html × Option RefreshTask))) :=
-  fun a b c d => IO.asTask do (·.1) <$> (x.run' a (← b.get)).toIO c (← d.get)
-
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
-partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : MetaM (Html × Option RefreshTask) := do
-  if ← IO.checkCanceled then return (.text "This function was cancelled", none)
+partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : MetaM (Option Html × Option RefreshTask) := do
+  if ← IO.checkCanceled then return (Html.text "This function was cancelled", none)
   if state.sections.all (·.pending.isEmpty) then
     return (← renderWidget state unfolds? rewriteTarget, none)
-  let state := state
   let (state, anyUpdate) ← (updateWidgetState state).run false
   if anyUpdate then
-    return (← renderWidget state unfolds? rewriteTarget, some { go := ← MetaMAsTask (waitAndUpdate state unfolds? rewriteTarget) })
+    return (← renderWidget state unfolds? rewriteTarget, ← RefreshTask.ofMetaM (waitAndUpdate state unfolds? rewriteTarget))
   IO.sleep 50 -- to avoid wasting computation, we wait a bit before we try again
   waitAndUpdate state unfolds? rewriteTarget
 
@@ -626,37 +596,36 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   let some goal := props.goals[0]? | return .text "rw!?: there is no goal to solve!"
   if loc.mvarId != goal.mvarId then
     return .text "rw!?: the selected expression should be in the main goal."
-  let go ← IO.asTask do
-    goal.ctx.val.runMetaM {} do
-      let md ← goal.mvarId.getDecl
-      let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
-      Meta.withLCtx lctx md.localInstances do
+  let task ← goal.ctx.val.runMetaM {} do RefreshTask.ofMetaM do
+    let md ← goal.mvarId.getDecl
+    let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
+    Meta.withLCtx lctx md.localInstances do
 
-        let rootExpr ← loc.rootExpr
-        let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
-          return (.text "rw!?: expressions with bound variables are not yet supported", none)
-        unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
-          return (.text <| "rw!?: the selected expression cannot be rewritten, \
-            because the motive is not type correct. \
-            This usually occurs when trying to rewrite a term that appears as a dependent argument.", none)
-        let location ← loc.fvarId?.mapM FVarId.getUserName
+      let rootExpr ← loc.rootExpr
+      let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
+        return (Html.text "rw!?: expressions with bound variables are not yet supported", none)
+      unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
+        return (Html.text <| "rw!?: the selected expression cannot be rewritten, \
+          because the motive is not type correct. \
+          This usually occurs when trying to rewrite a term that appears as a dependent argument.", none)
+      let location ← loc.fvarId?.mapM FVarId.getUserName
 
-        let range : Lsp.Range :=
-          if let .some range := props.replaceRange then
-            range
-          else
-            ⟨props.pos, props.pos⟩
+      let range : Lsp.Range :=
+        if let .some range := props.replaceRange then
+          range
+        else
+          ⟨props.pos, props.pos⟩
 
-        let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
-        let expr ← ExprWithCtx.save subExpr
-        if ← IO.checkCanceled then return (.text "This function was cancelled", none)
-        let state ← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?
-        waitAndUpdate state unfolds? (← ppExprTagged subExpr)
+      let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
+      let expr ← ExprWithCtx.save subExpr
+      if ← IO.checkCanceled then return (Html.text "This function was cancelled", none)
+      let state ← initializeWidgetState subExpr expr occ doc range location range.start.character loc.fvarId?
+      waitAndUpdate state unfolds? (← ppExprTagged subExpr)
 
   return <RefreshComponent
     initial={.text "rw!? is searching for rewrite lemmas..."}
     next={``runRefresh}
-    refresh={ ← WithRpcRef.mk { go } } />
+    refresh={ ← WithRpcRef.mk task } />
 
 /-- The component called by the `rw!?` tactic -/
 @[widget_module]
@@ -677,3 +646,19 @@ elab stx:"rw!?" : tactic => do
   let some range := (← getFileMap).lspRangeOfStx? stx | return
   Widget.savePanelWidgetInfo (hash LibraryRewriteComponent.javascript)
     (pure <| json% { replaceRange: $range }) stx
+
+private def withTreeCtx (ctx : Core.Context) : Core.Context :=
+  { ctx with maxHeartbeats := 0, diag := getDiag ctx.options }
+
+open Mathlib Tactic RefinedDiscrTree Lean
+elab "#infoview_suggest" : command => do
+  let ref := importedRewriteLemmasExt.getState (← getEnv)
+  if (← ref.get).isNone then
+    let tree ← Elab.Command.liftCoreM do
+      let ngen ← getNGen
+      let (cNGen, ngen) := ngen.mkChild
+      setNGen ngen
+      withTheReader Core.Context withTreeCtx do
+          createImportedDiscrTree cNGen (← getEnv) addRewriteEntry 5000 256
+    ref.set tree
+  Elab.Command.elabCommand <| ← `(show_panel_widgets [InfoviewSuggest.LibraryRewrite.LibraryRewriteComponent])
