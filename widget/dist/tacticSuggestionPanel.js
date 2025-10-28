@@ -69,16 +69,23 @@ export default function RefreshPanel(props) {
     React.useEffect(() => {
         let cancelled = false;
         async function loop(refresh) {
-            const result = await rs.call("ProofWidgets.runRefresh", refresh);
+            const result = await rs.call("ProofWidgets.awaitRefresh", refresh);
             if (cancelled)
                 return;
-            if (result.html)
+            if (result.html) {
                 setHtml(result.html);
-            if (result.refresh)
-                loop(result.refresh);
+                if (result.refresh)
+                    loop(result.refresh);
+            }
         }
         loop(props.refresh);
-        return () => { cancelled = true; };
+        // When this widget is removed, cancel the above loop, and set the given cancel token.
+        return () => {
+            cancelled = true;
+            if (props.cancelTk) {
+                rs.call("ProofWidgets.cancelRefresh", props.cancelTk);
+            }
+        };
     }, []);
     return _jsx(HtmlDisplay, { html: html });
 }

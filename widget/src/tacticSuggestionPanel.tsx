@@ -7,8 +7,6 @@ import * as React from "react";
 // import { Html } from "./htmlDisplay"
 // import HtmlDisplay from "./htmlDisplay"
 
-
-
 // import * as React from 'react';
 import { DocumentPosition, EnvPosContext, RpcSessionAtPos, importWidgetModule, mapRpcError,
     useAsyncPersistent, useRpcSession } from '@leanprover/infoview';
@@ -77,13 +75,14 @@ export interface RefreshPanelProps {
   /** The initial HTML to display */
   initial: Html
   /** A Lean task for iteratively refreshing the HTML display */
-  refresh: RpcPtr<''>
+  refresh: RpcPtr<'RefreshTask'>
+  cancelTk? : RpcPtr<'IO.CancelToken'>
 }
 
-export interface IncrementalResult {
+export interface RefreshResultProps {
   /** The new HTML to display */
   html? : Html
-  refresh? : RpcPtr<''>
+  refresh? : RpcPtr<'RefreshTask'>
 }
 
 export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
@@ -93,8 +92,8 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
   // Repeatedly call Lean to update
   React.useEffect(() => {
     let cancelled = false
-    async function loop(refresh: RpcPtr<''>) {
-        const result = await rs.call<RpcPtr<''>, IncrementalResult>("ProofWidgets.runRefresh", refresh)
+    async function loop(refresh: RpcPtr<'RefreshTask'>) {
+        const result = await rs.call<RpcPtr<'RefreshTask'>, RefreshResultProps> ("ProofWidgets.awaitRefresh", refresh)
         if (cancelled) return
         if (result.html) {
             setHtml(result.html)
@@ -102,7 +101,12 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
         }
     }
     loop(props.refresh)
-    return () => { cancelled = true }
+    return () => {
+        cancelled = true
+        if (props.cancelTk) {
+            rs.call<RpcPtr<'IO.CancelToken'>, void> ("ProofWidgets.cancelRefresh", props.cancelTk) 
+        }
+    }
   }, [])
   return <HtmlDisplay html={html}/>
 }

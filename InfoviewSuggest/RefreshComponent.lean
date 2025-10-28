@@ -23,9 +23,12 @@ structure RefreshResultProps where
   refresh : Option (WithRpcRef RefreshTask) := none
   deriving RpcEncodable
 
+deriving instance TypeName for IO.CancelToken
+
 structure RefreshComponentProps where
   initial : Html
   refresh : WithRpcRef RefreshTask
+  cancelTk : Option (WithRpcRef IO.CancelToken)
   deriving RpcEncodable
 
 
@@ -53,7 +56,7 @@ def RefreshTask.ofMetaM (k : MetaM RefreshResult) : MetaM RefreshTask := do
 
 
 @[server_rpc_method]
-def runRefresh (task : WithRpcRef RefreshTask) : RequestM (RequestTask RefreshResultProps) :=
+def awaitRefresh (task : WithRpcRef RefreshTask) : RequestM (RequestTask RefreshResultProps) :=
   RequestM.asTask do
     match task.val.task.get with
     | .none => return {}
