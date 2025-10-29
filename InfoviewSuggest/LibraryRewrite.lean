@@ -427,6 +427,7 @@ def generateSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : RewriteLem
   MetaM.asTask (
     tryCatchRuntimeEx (.ok <$>
       withNewMCtxDepth do
+        Core.checkSystem "rw!?"
         let thm ← mkConstWithFreshMVarLevels lem.name
         let some rewrite ← checkRewrite thm expr lem.symm | return none
         some <$> rewrite.toResult (.inl lem.name) pasteInfo)
@@ -453,6 +454,7 @@ def generateLocalSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : FVarI
   MetaM.asTask (
     tryCatchRuntimeEx (.ok <$>
       withNewMCtxDepth do
+        Core.checkSystem "rw!?"
         let some rewrite ← checkRewrite (.fvar lem.1) expr lem.2 | return none
         some <$> rewrite.toResult (.inr lem.1) pasteInfo)
       fun e => do
@@ -494,7 +496,7 @@ structure WidgetState where
 
 def initializeWidgetState (expr : Expr) (pasteInfo : RwPasteInfo)
     (exceptFVarId : Option FVarId) : MetaM WidgetState := do
-  Core.checkInterrupted
+  Core.checkSystem "rw!?"
   let mut sections := #[]
 
   for candidates in ← getHypothesisCandidates expr exceptFVarId do
@@ -607,7 +609,7 @@ where
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
 partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) :
     MetaM RefreshResult := do
-  Core.checkInterrupted
+  Core.checkSystem "rw!?"
   if state.sections.all (·.pending.isEmpty) then
     return .last <| ← renderWidget state unfolds? rewriteTarget
   let (state, anyUpdate) ← (updateWidgetState state).run false
@@ -627,9 +629,20 @@ structure TacticInsertionProps extends PanelWidgetProps where
   msg : Option String := none
 deriving RpcEncodable
 
-@[server_rpc_method_cancellable]
+/--
+When the widget unloads, it is supposed to set the cancel token for the ongoing rpc call.
+However, this fails if the widget didn't have enough time to load properly,
+for example because the user is clicking very quickly in the infoview.
+So, `currentCancelToken` is used to ensure that the previous call is cancelled.
+-/
+private initialize currentCancelToken : IO.Ref (Option IO.CancelToken) ←
+  IO.mkRef none
+
+@[server_rpc_method]
 private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   RequestM.asTask do
+  if let some cancelTk ← currentCancelToken.modifyGet (·, none) then
+    cancelTk.set
   let doc ← RequestM.readDoc
   let some loc := props.selectedLocations.back? |
     return .text "rw!?: Please shift-click an expression you would like to rewrite."
@@ -639,6 +652,7 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   if loc.mvarId != goal.mvarId then
     return .text "rw!?: the selected expression should be in the main goal."
   let cancelTk ← IO.CancelToken.new
+  currentCancelToken.set cancelTk
   let task ← goal.ctx.val.runMetaM {} do withTheReader Core.Context ({ · with cancelTk? := cancelTk }) do
     RefreshTask.ofMetaM do
     let md ← goal.mvarId.getDecl
