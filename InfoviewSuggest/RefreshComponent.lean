@@ -63,6 +63,11 @@ def awaitRefresh (task : WithRpcRef RefreshTask) : RequestM (RequestTask Refresh
     | .last html => return { html }
     | .cont html task => return { html, refresh := ← WithRpcRef.mk task}
 
+@[server_rpc_method]
+def cancelRefresh (cancelTk : WithRpcRef IO.CancelToken) : RequestM (RequestTask String) :=
+  RequestM.asTask do cancelTk.val.set; return "ok"
+
+
 @[widget_module]
 def RefreshComponent : Component RefreshComponentProps where
   javascript := include_str ".." / "widget" / "dist" / "tacticSuggestionPanel.js"

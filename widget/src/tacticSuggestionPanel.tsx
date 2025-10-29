@@ -91,6 +91,8 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
 
   // Repeatedly call Lean to update
   React.useEffect(() => {
+    // Set the html to the given initial value at the start of each re-render
+    setHtml(props.initial)
     let cancelled = false
     async function loop(refresh: RpcPtr<'RefreshTask'>) {
         const result = await rs.call<RpcPtr<'RefreshTask'>, RefreshResultProps> ("ProofWidgets.awaitRefresh", refresh)
@@ -107,6 +109,6 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
             rs.call<RpcPtr<'IO.CancelToken'>, void> ("ProofWidgets.cancelRefresh", props.cancelTk) 
         }
     }
-  }, [])
+  }, [props])
   return <HtmlDisplay html={html}/>
 }

@@ -413,66 +413,100 @@ def Rewrite.toResult (rw : Rewrite) (name : Name ⊕ FVarId) (pasteInfo : RwPast
     pattern := ← pattern lemmaType rw.symm
   }
 
-/-- `generateSuggestion` will be called for different `lem` in parallel using `IO.asTask`. -/
-def generateSuggestion (expr : ExprWithCtx) (lem : RewriteLemma) (pasteInfo : RwPasteInfo) :
-    IO (Except Html <| Option Result) := do
-  expr.runMetaM fun expr =>
+/-- Helper function to generate a `Task` from a `CoreM` function. -/
+def CoreM.asTask {α} (k : CoreM α) (e : IO.Error → BaseIO α) : CoreM (Task α) := do
+  BaseIO.asTask <| EIO.catchExceptions ((·.1) <$> k.toIO (← read) (← get)) e
+
+/-- Helper function to generate a `Task` from a `MetaM` function. -/
+def MetaM.asTask {α} (k : MetaM α) (e : IO.Error → BaseIO α) : MetaM (Task α) := do
+  CoreM.asTask (k.run' (← read) (← get)) e
+
+/-- `generateSuggestion` will be called for different theorems `lem` in parallel. -/
+def generateSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : RewriteLemma) :
+    MetaM <| Task (Except Html <| Option Result) :=
+  MetaM.asTask (
     tryCatchRuntimeEx (.ok <$>
-      withCurrHeartbeats do withNewMCtxDepth do
+      withNewMCtxDepth do
         let thm ← mkConstWithFreshMVarLevels lem.name
         let some rewrite ← checkRewrite thm expr lem.symm | return none
         some <$> rewrite.toResult (.inl lem.name) pasteInfo)
-    fun e => do
-      return .error
-        <li>
-          An error occurred when processing theorem
-          <InteractiveCode fmt={← ppConstTagged lem.name}/>:
-          <br/>
-          <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
-        </li>
-
-/-- The same as `generateSuggestion`, but for local hypotheses. -/
-def generateLocalSuggestion (expr : ExprWithCtx) (lem : FVarId × Bool) (pasteInfo : RwPasteInfo) :
-    IO (Except Html <| Option Result) := do
-  expr.runMetaM fun expr =>
-    tryCatchRuntimeEx (.ok <$>
-      withCurrHeartbeats do withNewMCtxDepth do
-        let some rewrite ← checkRewrite (.fvar lem.1) expr lem.2 | return none
-        some <$> rewrite.toResult (.inr lem.1) pasteInfo)
-    fun e => do
+      fun e => do
+        return .error
+          <li>
+            An error occurred when processing theorem
+            <InteractiveCode fmt={← ppConstTagged lem.name}/>:
+            <br/>
+            <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
+          </li>)
+    fun e =>
       return .error
         <li>
           An error occurred when processing hypothesis
-          <InteractiveCode fmt={← ppExprTagged (.fvar lem.1)}/>:
+          {.text lem.1.toString}:
           <br/>
-          <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
+          {.text e.toString}
         </li>
 
-structure SectionState where
-  kind : Kind
-  results : Array Result
-  pending : Array (Task (Except IO.Error (Except Html <| Option Result)))
+/-- The same as `generateSuggestion`, but for local hypotheses. -/
+def generateLocalSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : FVarId × Bool) :
+    MetaM <| Task (Except Html <| Option Result) :=
+  MetaM.asTask (
+    tryCatchRuntimeEx (.ok <$>
+      withNewMCtxDepth do
+        let some rewrite ← checkRewrite (.fvar lem.1) expr lem.2 | return none
+        some <$> rewrite.toResult (.inr lem.1) pasteInfo)
+      fun e => do
+        return .error
+          <li>
+            An error occurred when processing hypothesis
+            <InteractiveCode fmt={← ppExprTagged (.fvar lem.1)}/>:
+            <br/>
+            <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
+          </li>)
+    fun e =>
+      return .error
+        <li>
+          An error occurred when processing hypothesis
+          {.text lem.1.name.toString}:
+          <br/>
+          {.text e.toString}
+        </li>
 
+/-- `SectionState` is the part of `WidgetState` corresponding to each section of suggestions. -/
+structure SectionState where
+  /-- Whether the rewrites are using a local hypothesis, a local theorem, or an imported theorem. -/
+  kind : Kind
+  /-- The results of the theorems that successfully rewrite. -/
+  results : Array Result
+  /-- The computations for rewrite theorems that have not finished evaluating. -/
+  pending : Array (Task (Except Html <| Option Result))
+
+/-- When the rewrite results are computed, `WidgetState` is used to keep track of the progress.
+Initially, it contains a bunch of unfinished `Task`s, and with each round of `updateWidgetState`,
+the finished tasks are stored as results in each `SectionState`. -/
 structure WidgetState where
+  /-- The states of the sections in the widget. -/
   sections : Array SectionState
+  /-- The errors that appeared in evaluating . -/
   exceptions : Array Html
 
 
 
-def initializeWidgetState (e : Expr) (expr : ExprWithCtx) (pasteInfo : RwPasteInfo)
+def initializeWidgetState (expr : Expr) (pasteInfo : RwPasteInfo)
     (exceptFVarId : Option FVarId) : MetaM WidgetState := do
+  Core.checkInterrupted
   let mut sections := #[]
 
-  for candidates in ← getHypothesisCandidates e exceptFVarId do
-    let pending ← candidates.mapM (IO.asTask <| generateLocalSuggestion expr · pasteInfo)
+  for candidates in ← getHypothesisCandidates expr exceptFVarId do
+    let pending ← candidates.mapM (generateLocalSuggestion expr pasteInfo)
     sections := sections.push { kind := .hypothesis, results := #[], pending }
 
-  for candidates in ← getModuleCandidates e do
-    let pending ← candidates.mapM (IO.asTask <| generateSuggestion expr · pasteInfo)
+  for candidates in ← getModuleCandidates expr do
+    let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
     sections := sections.push { kind := .fromFile, results := #[], pending }
 
-  for candidates in ← getImportCandidates e do
-    let pending ← candidates.mapM (IO.asTask <| generateSuggestion expr · pasteInfo)
+  for candidates in ← getImportCandidates expr do
+    let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
     sections := sections.push { kind := .fromCache, results := #[], pending }
 
   return { sections, exceptions := #[] }
@@ -487,12 +521,13 @@ def updateWidgetState (state : WidgetState) : StateRefT Bool MetaM WidgetState :
     let mut remaining := #[]
     let mut results := s.results
     for t in s.pending do
-      if ← IO.hasFinished t then
+      if !(← IO.hasFinished t) then
+        remaining := remaining.push t
+      else
         match t.get with
-        | .error e => exceptions := exceptions.push <li> {.text e.toString} </li>
-        | .ok <| .error e => exceptions := exceptions.push e
-        | .ok <| .ok none => pure ()
-        | .ok <| .ok (some result) =>
+        | .error e => exceptions := exceptions.push e
+        | .ok none => pure ()
+        | .ok (some result) =>
           set true
           if let some idx ← findDuplicate result results then
             if result.info.lt results[idx]!.info then
@@ -502,8 +537,6 @@ def updateWidgetState (state : WidgetState) : StateRefT Bool MetaM WidgetState :
               results := results.binInsert (lt := (·.info.lt ·.info)) { result with filtered := none }
           else
             results := results.binInsert (lt := (·.info.lt ·.info)) result
-      else
-        remaining := remaining.push t
     sections := sections.push { s with
       pending := remaining
       results := results.insertionSort (lt := (·.info.lt ·.info))
@@ -520,6 +553,7 @@ where
 
 def renderWidget (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : IO Html := do
   return <FilterDetails
+    -- TODO: actually say what expression these suggestions are for
     summary={.text "Rewrite suggestions:"}
     all={← render false state unfolds? rewriteTarget}
     filtered={← render true state unfolds? rewriteTarget}
@@ -570,9 +604,9 @@ where
       if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
-partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : MetaM RefreshResult := do
-  -- TODO: use cancel tokens
-  -- if ← IO.checkCanceled then return .last <| .text "This function was cancelled"
+partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) :
+    MetaM RefreshResult := do
+  Core.checkInterrupted
   if state.sections.all (·.pending.isEmpty) then
     return .last <| ← renderWidget state unfolds? rewriteTarget
   let (state, anyUpdate) ← (updateWidgetState state).run false
@@ -603,7 +637,9 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   let some goal := props.goals[0]? | return .text "rw!?: there is no goal to solve!"
   if loc.mvarId != goal.mvarId then
     return .text "rw!?: the selected expression should be in the main goal."
-  let task ← goal.ctx.val.runMetaM {} do RefreshTask.ofMetaM do
+  let cancelTk ← IO.CancelToken.new
+  let task ← goal.ctx.val.runMetaM {} do withTheReader Core.Context ({ · with cancelTk? := cancelTk }) do
+    RefreshTask.ofMetaM do
     let md ← goal.mvarId.getDecl
     let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
     Meta.withLCtx lctx md.localInstances do
@@ -616,7 +652,7 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
       let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
         return .last <| .text "rw!?: expressions with bound variables are not yet supported"
       unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
-        return .last <| .text <| "rw!?: the selected expression cannot be rewritten, \
+        return .last <| .text "rw!?: the selected expression cannot be rewritten, \
           because the motive is not type correct. \
           This usually occurs when trying to rewrite a term that appears as a dependent argument."
       let location ← loc.fvarId?.mapM FVarId.getUserName
@@ -627,11 +663,8 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
         else
           ⟨props.pos, props.pos⟩
 
-      let expr ← ExprWithCtx.save subExpr
       let pasteInfo := { «meta» := doc.meta, range, occ, hyp? := location }
-      -- TODO: use the cancel tokens
-      -- if ← IO.checkCanceled then return .last <| .text "This function was cancelled"
-      let state ← initializeWidgetState subExpr expr pasteInfo loc.fvarId?
+      let state ← initializeWidgetState subExpr pasteInfo loc.fvarId?
       -- Computing the unfold is cheap enough that it doesn't need a separate thread.
       -- However, we do this after the parallel computations have already been spawned by `initializeWidgetState`.
       let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
@@ -640,7 +673,7 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   return <RefreshComponent
     initial={.text "rw!? is searching for rewrite lemmas..."}
     refresh={← WithRpcRef.mk task}
-    cancelTk={none} />
+    cancelTk={← WithRpcRef.mk cancelTk} />
 
 /-- The component called by the `rw!?` tactic -/
 @[widget_module]

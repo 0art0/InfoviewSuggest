@@ -67,6 +67,8 @@ export default function RefreshPanel(props) {
     const [html, setHtml] = React.useState(props.initial);
     // Repeatedly call Lean to update
     React.useEffect(() => {
+        // Set the html to the initial value at the start of each re-render
+        setHtml(props.initial);
         let cancelled = false;
         async function loop(refresh) {
             const result = await rs.call("ProofWidgets.awaitRefresh", refresh);
@@ -79,13 +81,12 @@ export default function RefreshPanel(props) {
             }
         }
         loop(props.refresh);
-        // When this widget is removed, cancel the above loop, and set the given cancel token.
         return () => {
             cancelled = true;
             if (props.cancelTk) {
                 rs.call("ProofWidgets.cancelRefresh", props.cancelTk);
             }
         };
-    }, []);
+    }, [props]);
     return _jsx(HtmlDisplay, { html: html });
 }
