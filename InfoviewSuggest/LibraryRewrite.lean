@@ -595,13 +595,14 @@ where
       <summary className="mv2 pointer">
         Pattern <InteractiveCode fmt={head.pattern}/> {.text suffix}
       </summary>
-      {renderSectionCore filter s.results}
+      {← renderSectionCore filter s.results}
     </details>
 
   /-- Render the list of rewrite results in one section. -/
-  renderSectionCore (filter : Bool) (sec : Array Result) : Html :=
-    .element "ul" #[("style", json% { "padding-left" : "30px"})] <|
-      if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
+  renderSectionCore (filter : Bool) (sec : Array Result) : Option Html := do
+    let htmls := if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
+    guard (!htmls.isEmpty)
+    return .element "ul" #[("style", json% { "padding-left" : "30px"})] htmls
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
 partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) :
