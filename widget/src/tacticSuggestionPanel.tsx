@@ -76,12 +76,14 @@ export interface RefreshPanelProps {
   initial: Html
   /** A Lean task for iteratively refreshing the HTML display */
   refresh: RpcPtr<'RefreshTask'>
+  /** A cancel token that will cancel the `refresh` computation */
   cancelTk? : RpcPtr<'IO.CancelToken'>
 }
 
 export interface RefreshResultProps {
   /** The new HTML to display */
   html? : Html
+  /** A Lean task for continuing to refreshing the HTML display */
   refresh? : RpcPtr<'RefreshTask'>
 }
 
@@ -91,7 +93,7 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
 
   // Repeatedly call Lean to update
   React.useEffect(() => {
-    // Set the html to the given initial value at the start of each re-render
+    // Set the html to the initial value at the start of each re-render
     setHtml(props.initial)
     let cancelled = false
     async function loop(refresh: RpcPtr<'RefreshTask'>) {
