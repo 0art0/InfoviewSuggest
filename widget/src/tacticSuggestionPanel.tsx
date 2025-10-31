@@ -201,55 +201,53 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
   return (
     <div style={{
       display: 'flex',
-      gap: '12px',
-      padding: '12px',
-      backgroundColor: 'var(--bg-success)',
-      borderRadius: '8px',
-      border: '1px solid var(--border-default)',
-      transition: 'all 0.2s ease',
-      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+      gap: '6px',
+      padding: '6px 6px',
+      /* remove boxed background; use a subtle left accent instead */
+      backgroundColor: 'transparent',
+      border: 'none',
+      boxShadow: 'none',
+      alignItems: 'stretch',
+      borderLeft: '2px solid var(--accent-blue)'
     }}>
+      {/* Left: clickable codicon (acts like a button) */}
+      <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+        <span
+          role="button"
+          tabIndex={0}
+          title="Paste suggestion into the editor"
+          aria-label="Paste suggestion into the editor"
+          className="link pointer mh2 dim codicon codicon-insert"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}
+          onClick={() => { handleTryThis(); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleTryThis(); } }}
+          onMouseEnter={(e) => {
+            const t = e.currentTarget as HTMLElement;
+            t.style.opacity = '0.9';
+            t.style.transform = 'translateY(-1px)';
+          }}
+          onMouseLeave={(e) => {
+            const t = e.currentTarget as HTMLElement;
+            t.style.opacity = '';
+            t.style.transform = '';
+          }}
+        />
+      </div>
+
       <div style={{ flex: 1, minWidth: 0 }}>
         {/* Replacement Text */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          marginBottom: showName || result.extraGoals.length > 0 ? '8px' : 0
+          gap: '6px',
+          marginBottom: showName || result.extraGoals.length > 0 ? '4px' : 0
         }}>
-          <button
-            onClick={handleTryThis}
-              style={{
-                padding: '6px 12px',
-                backgroundColor: 'var(--accent-blue)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                fontSize: '13px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                flexShrink: 0,
-                alignSelf: 'flex-start'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--accent-blue-strong)';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--accent-blue)';
-                e.currentTarget.style.transform = 'translateY(0)';
-              }}
-          >
-            Try this
-          </button>
           <div style={{
-            fontSize: '14px',
+            fontSize: '12px',
             fontFamily: 'monospace',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            marginBottom: showName || result.extraGoals.length > 0 ? '8px' : 0
           }}>
             <InteractiveCode fmt={result.replacementText} />
           </div>
@@ -257,33 +255,33 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
 
         {/* Extra Goals */}
         {result.extraGoals.length > 0 && (
-          <div style={{ 
-            marginBottom: showName ? '8px' : 0,
+          <div style={{
+            marginBottom: showName ? '6px' : 0,
             display: 'flex',
             flexDirection: 'column',
-            gap: '4px' 
+            gap: '3px'
           }}>
             {result.extraGoals.map((goal, index) => (
               <div key={index} style={{
-                padding: '4px 8px',
-                backgroundColor: 'var(--bg-extra)',
-                borderLeft: '2px solid var(--vscode-lean4-infoView\\.turnstile)',
-                borderRadius: '4px',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}>
-                <span style={{ 
-                  color: 'var(--vscode-lean4-infoView\\.turnstile)',
-                  fontWeight: '500',
+                    padding: '2px 6px',
+                    backgroundColor: 'var(--bg-extra)',
+                    borderLeft: '2px solid var(--turnstile)',
+                    borderRadius: '3px',
+                    fontSize: '11px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                <span style={{
+                      color: 'var(--turnstile)',
+                      fontWeight: 500,
                   userSelect: 'none'
                 }}>⊢</span>
                 <span style={{
                   flex: 1,
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
                 }}>
                   <InteractiveCode fmt={goal} />
                 </span>
@@ -298,20 +296,20 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
             <hr style={{
               border: 'none',
               borderTop: '1px solid var(--border-default)',
-              margin: '12px 0 12px 0'
+              margin: '6px 0'
             }} />
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              fontSize: '12px',
+              gap: '6px',
+              fontSize: '11px',
               color: 'var(--text-muted)'
             }}>
-              <span style={{ 
-                fontWeight: '600',
+              <span style={{
+                fontWeight: 600,
                 textTransform: 'uppercase',
                 letterSpacing: '0.025em',
-                fontSize: '11px',
+                fontSize: '10px',
                 color: 'var(--text-muted)'
               }}>Lemma</span>
               <span style={{
@@ -322,28 +320,7 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
               }}>
                 <InteractiveCode fmt={result.prettyLemma} />
               </span>
-              <button
-                onClick={() => navigator.clipboard.writeText(result.name.toString())}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '4px',
-                  cursor: 'pointer',
-                  color: 'var(--text-muted)',
-                  opacity: 0.7,
-                  transition: 'all 0.2s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  flexShrink: 0,
-                  fontSize: '14px'
-                }}
-                title="Copy lemma name"
-                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '0.7'}
-              >
-                {/* Using a different clipboard icon */}
-                📋
-              </button>
+              {/* copy-to-clipboard removed intentionally */}
             </div>
           </div>
         )}
@@ -353,20 +330,18 @@ function renderSuccessResult(ec: EditorConnection, result: Premise & ValidationS
 }
 
 function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element {
-  const handleCopy = () => {
-    navigator.clipboard.writeText(result.name.toString());
-  };
-
   return (
-    <div style={{
-      padding: '8px 12px',
-      marginBottom: '6px',
-      backgroundColor: 'var(--bg-error)',
-      border: '1px solid var(--accent-red)',
-      borderRadius: '6px',
+      <div style={{
+      padding: '4px 6px',
+      marginBottom: '3px',
+      /* remove boxed background and border */
+      backgroundColor: 'transparent',
+      border: 'none',
+      borderRadius: 0,
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
+      borderLeft: '2px solid var(--error-fg)'
     }}>
       {/* Content Container */}
       <div style={{
@@ -378,8 +353,8 @@ function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element
       }}>
         {/* Lemma */}
         <div style={{
-          fontSize: '14px',
-          color: 'var(--accent-red)',
+          fontSize: '12px',
+          color: 'var(--text-default)',
           fontFamily: 'monospace',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -390,61 +365,37 @@ function renderErrorResult(result: Premise & ValidationErrorResult): JSX.Element
 
         {/* Error Message */}
         <div style={{
-          fontSize: '12px',
-          color: 'var(--accent-red)',
-          lineHeight: '1.4'
+          fontSize: '11px',
+          color: 'var(--error-fg)',
+          lineHeight: '1.25'
         }}>
           <InteractiveMessageData msg={result.error} />
         </div>
       </div>
-
-      {/* Copy Button */}
-      <button
-        onClick={handleCopy}
-        style={{
-          background: 'none',
-          border: 'none',
-          padding: '4px',
-          cursor: 'pointer',
-          color: 'var(--accent-red)',
-          opacity: 0.6,
-          transition: 'opacity 0.2s ease',
-          display: 'flex',
-          alignItems: 'center',
-          flexShrink: 0
-        }}
-        title="Copy lemma name"
-        onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-        onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
-      >
-        📋
-      </button>
     </div>
   );
 }
 
 function renderPendingResult(result: Premise): JSX.Element {
-  const handleCopy = () => {
-    navigator.clipboard.writeText(result.name);
-  };
-
-  return (
+    return (
     <div style={{
-      padding: '8px 12px',
-      marginBottom: '6px',
-      backgroundColor: 'var(--bg-pending)',
-      border: '1px solid var(--accent-yellow)',
-      borderRadius: '6px',
+      padding: '4px 6px',
+      marginBottom: '3px',
+      /* remove boxed background and border */
+      backgroundColor: 'transparent',
+      border: 'none',
+      borderRadius: 0,
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
       position: 'relative',
-      transition: 'all 0.2s ease',
+      transition: 'all 0.12s ease',
+      borderLeft: '2px solid var(--accent-yellow)'
     }}>
       {/* Spinning Circle */}
       <div style={{
-        width: '16px',
-        height: '16px',
+        width: '12px',
+        height: '12px',
         borderRadius: '50%',
         borderTop: '2px solid var(--accent-yellow)',
         borderRight: '2px solid transparent',
@@ -455,7 +406,7 @@ function renderPendingResult(result: Premise): JSX.Element {
       {/* Lemma Content */}
       <div style={{
         flex: 1,
-        fontSize: '14px',
+        fontSize: '12px',
         color: 'var(--accent-yellow)',
         fontFamily: 'monospace',
         overflow: 'hidden',
@@ -465,25 +416,7 @@ function renderPendingResult(result: Premise): JSX.Element {
         <InteractiveCode fmt={result.prettyLemma} />
       </div>
 
-      {/* Copy Button */}
-      <button
-        onClick={handleCopy}
-        style={{
-          background: 'none',
-          border: 'none',
-          padding: '4px',
-          color: 'var(--accent-yellow)',
-          opacity: 0.6,
-          transition: 'opacity 0.2s ease',
-          display: 'flex',
-          alignItems: 'center',
-        }}
-        title="Copy lemma name"
-        onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-        onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
-      >
-        📋
-      </button>
+      {/* copy-to-clipboard removed intentionally */}
 
       <style>{`
         @keyframes spin {
@@ -500,81 +433,82 @@ function renderValidationState(ec: EditorConnection, state: TacticSuggestionPane
 
   const successes = filterResults ? eraseEquivalentEntries(state.successes) : state.successes;
 
-  return (
+    return (
     <div style={{
       backgroundColor: 'var(--panel-background, white)',
       border: '1px solid var(--border-default, #e1e4e8)',
-      borderRadius: '8px',
-      padding: '16px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+      borderRadius: '6px',
+      /* remove bottom padding and keep compact vertical spacing */
+      padding: '10px 12px 0 12px',
+      boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
     }}>
-    {/* Successes Section */}
-    {successes.length > 0 && (
-      <div style={{ marginBottom: '16px' }}>
-        {successes.map((s, i) => (
-          <div key={`succ-${i}`} style={{ marginBottom: '8px' }}>
-            {renderSuccessResult(ec, s, !filterResults, range, documentUri)}
-          </div>
-        ))}
-      </div>
-    )}
+      {/* Successes Section */}
+      {successes.length > 0 && (
+        <div style={{ marginBottom: '6px' }}>
+          {successes.map((s, i) => (
+            <div key={`succ-${i}`} style={{ marginBottom: '4px' }}>
+              {renderSuccessResult(ec, s, !filterResults, range, documentUri)}
+            </div>
+          ))}
+        </div>
+      )}
 
-    {/* Failures Section */}
-    {state.failures.length > 0 && (
-      <details style={{ marginBottom: '16px' }}>
-        <summary style={{
-          padding: '8px 12px',
-          cursor: 'pointer',
-          userSelect: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          borderRadius: '4px',
-          backgroundColor: 'var(--bg-error)',
-          marginBottom: '8px'
-        }}>
-          <span style={{ color: 'var(--accent-red)', fontSize: '16px' }}>✕</span>
-          <span style={{ fontWeight: 500 }}>
-            Failures ({state.failures.length})
-          </span>
-        </summary>
-        {state.failures.map((f, i) => (
-          <div key={`fail-${i}`} style={{ marginBottom: '8px' }}>{renderErrorResult(f)}</div>
-        ))}
-      </details>
-    )}
+      {/* Failures Section */}
+      {state.failures.length > 0 && (
+        <details style={{ marginBottom: '8px' }}>
+          <summary style={{
+            padding: '6px 10px',
+            cursor: 'pointer',
+            userSelect: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            borderRadius: '4px',
+            backgroundColor: 'var(--bg-error)',
+            marginBottom: '6px'
+          }}>
+            <span style={{ color: 'var(--accent-red)', fontSize: '16px' }}>✕</span>
+            <span style={{ fontWeight: 500 }}>
+              Failures ({state.failures.length})
+            </span>
+          </summary>
+          {state.failures.map((f, i) => (
+            <div key={`fail-${i}`} style={{ marginBottom: '6px' }}>{renderErrorResult(f)}</div>
+          ))}
+        </details>
+      )}
 
-    {/* Pending Section */}
-    {state.pending.length > 0 && (
-      <details open style={{ marginBottom: '16px' }}>
-        <summary style={{
-          padding: '8px 12px',
-          cursor: 'pointer',
-          userSelect: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          borderRadius: '4px',
-          backgroundColor: 'var(--bg-pending)',
-          marginBottom: '8px'
-        }}>
-          <span style={{ 
-            color: 'var(--accent-yellow)',
-            fontSize: '16px',
-            display: 'inline-block',
-            animation: 'spin 2s linear infinite'
-          }}>⌚</span>
-          <span style={{ fontWeight: 500 }}>
-            In Progress ({state.pending.length})
-          </span>
-        </summary>
-        {state.pending.map((p, i) => (
-          <div key={`pending-${i}`} style={{ marginBottom: '8px' }}>{renderPendingResult(p)}</div>
-        ))}
-      </details>
-    )}
+      {/* Pending Section */}
+      {state.pending.length > 0 && (
+        <details open style={{ marginBottom: '8px' }}>
+          <summary style={{
+            padding: '6px 10px',
+            cursor: 'pointer',
+            userSelect: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            borderRadius: '4px',
+            backgroundColor: 'var(--bg-pending)',
+            marginBottom: '6px'
+          }}>
+            <span style={{
+                color: 'var(--accent-yellow)',
+                fontSize: '14px',
+              display: 'inline-block',
+              animation: 'spin 2s linear infinite'
+            }}>⌚</span>
+            <span style={{ fontWeight: 500 }}>
+              In Progress ({state.pending.length})
+            </span>
+          </summary>
+          {state.pending.map((p, i) => (
+            <div key={`pending-${i}`} style={{ marginBottom: '6px' }}>{renderPendingResult(p)}</div>
+          ))}
+        </details>
+      )}
 
-    <style>{`
+      <style>{`
       :root {
         /* Theme-aware variables with sensible fallbacks */
         --border-default: var(--vscode-editorWidget-border, #e1e4e8);
@@ -585,7 +519,10 @@ function renderValidationState(ec: EditorConnection, state: TacticSuggestionPane
         --bg-extra: var(--vscode-editorBackground, #f1f5f9);
         --accent-blue: var(--vscode-button-background, #0969da);
         --accent-blue-strong: #0860ca;
-        --accent-red: var(--vscode-editorError-foreground, #dc2626);
+          --accent-red: var(--vscode-editorError-foreground, #dc2626);
+          --error-fg: var(--vscode-editorError-foreground, var(--accent-red));
+          --error-bg-subtle: var(--vscode-editorError-background, #fef2f2);
+          --turnstile: var(--vscode-lean4-infoView\\.turnstile, #6b7280);
         --accent-yellow: var(--vscode-editorWarning-foreground, #ca8a04);
         --text-default: var(--vscode-editor-foreground, #1f2937);
         --text-muted: var(--vscode-descriptionForeground, #6b7280);
@@ -615,8 +552,8 @@ function renderValidationState(ec: EditorConnection, state: TacticSuggestionPane
         background-color: rgba(0,0,0,0.03);
       }
     `}</style>
-  </div>
-);
+    </div>
+  );
 }
 
 /**
@@ -636,25 +573,25 @@ export default function TacticSuggestionsPanel(props: TacticSuggestionPanelProps
   async function e() {
     r.current += 1;
     const id = r.current;
-    
+
     updateState({ kind: "reset", result: { premises: props.premises } });
-    
+
     const promises = props.premises.map(async (premise) => {
-        const result = await rs.call<PremiseWithMetadata, PremiseValidationResult>(
-          props.validationMethod,
-          { selectionMetadata: props.selectionMetadata, premise }
-        );
-        // If a newer run started, abort processing this result
-        if (r.current !== id) return;
-        updateState(addPremiseToValidationResult(premise, result));
+      const result = await rs.call<PremiseWithMetadata, PremiseValidationResult>(
+        props.validationMethod,
+        { selectionMetadata: props.selectionMetadata, premise }
+      );
+      // If a newer run started, abort processing this result
+      if (r.current !== id) return;
+      updateState(addPremiseToValidationResult(premise, result));
     });
-    
+
     await Promise.all(promises);
   };
 
   React.useEffect(() => { e() }, [rs, props.premises.map(p => p.name).join(",")]); // TODO: think about why this is necessary, and remove if it is not
 
   return (
-      renderValidationState(ec, state, props.range, props.documentUri)
+    renderValidationState(ec, state, props.range, props.documentUri)
   );
 }
