@@ -619,15 +619,15 @@ where
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
 partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) :
-    MetaM RefreshResult := do
+    MetaM (RefreshResult MetaM) := do
   -- If there is nothing to compute, return the final (empty) display
   if state.sections.all (·.pending.isEmpty) then
     return .last (renderWidget state unfolds? rewriteTarget)
   loop state
 where
-  loop (state : WidgetState) : MetaM RefreshResult := do
+  loop (state : WidgetState) : MetaM (RefreshResult MetaM) := do
     Core.checkSystem "rw!?"
-    -- Wait until some computation is finished
+    -- Wait until some task has finished
     while !(← liftM <| state.sections.anyM (·.pending.anyM IO.hasFinished)) do
       IO.sleep 10
       Core.checkSystem "rw!?"
@@ -635,9 +635,7 @@ where
     if state.sections.all (·.pending.isEmpty) then
       return .last (renderWidget state unfolds? rewriteTarget)
     else
-      return .cont
-        (renderWidget state unfolds? rewriteTarget)
-        (← RefreshTask.ofMetaM <| loop state)
+      return .cont (renderWidget state unfolds? rewriteTarget) (refreshM <| loop state)
 
 structure TacticInsertionProps extends PanelWidgetProps where
   replaceRange : Option Lsp.Range := none
@@ -653,18 +651,13 @@ So, `cancelTokenRef` is used to ensure that the previous call is cancelled.
 private initialize cancelTokenRef : IO.Ref (Option IO.CancelToken) ←
   IO.mkRef none
 
-/-- Create a new `IO.CancelToken`, storing it in the `cancelTokenRef` and
-activating the cancel token that was previously there. -/
-def newActiveCancelToken : BaseIO IO.CancelToken := do
-  let new ← IO.CancelToken.new
-  let some old ← cancelTokenRef.modifyGet (·, new) | return new
-  old.set
-  return new
-
 @[server_rpc_method]
 private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   RequestM.asTask do
-  let cancelTk ← newActiveCancelToken
+  let cancelTk ← IO.CancelToken.new
+  if let some oldTk ← cancelTokenRef.swap cancelTk then
+    oldTk.set
+
   let doc ← RequestM.readDoc
   let some loc := props.selectedLocations.back? |
     return .text "rw!?: Please shift-click an expression you would like to rewrite."
@@ -673,12 +666,13 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   let some goal := props.goals[0]? | return .text "rw!?: there is no goal to solve!"
   if loc.mvarId != goal.mvarId then
     return .text "rw!?: the selected expression should be in the main goal."
-  let task ← goal.ctx.val.runMetaM {} do withTheReader Core.Context ({ · with cancelTk? := cancelTk }) do
-    RefreshTask.ofMetaM do
-    catchInternalId Elab.abortTermExceptionId (do
+  let ref ← RefreshRef.new
+  discard <| IO.asTask (prio := .dedicated) do
+    goal.ctx.val.runMetaM {} do withTheReader Core.Context ({ · with cancelTk? := cancelTk }) do
       let md ← goal.mvarId.getDecl
       let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
       Meta.withLCtx lctx md.localInstances do
+      RefreshT.run ref do refreshM do
 
         let rootExpr ← loc.rootExpr
         -- TODO: instead of rejecting terms with bound variables, and rejecting terms with a bad motive,
@@ -704,12 +698,11 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
         -- Computing the unfold is cheap enough that it doesn't need a separate thread.
         -- However, we do this after the parallel computations have already been spawned by `initializeWidgetState`.
         let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
-        waitAndUpdate state unfolds? (← ppExprTagged subExpr))
-      fun _ => return .last <| .text "this `rw!?` instance was cancelled"
+        waitAndUpdate state unfolds? (← ppExprTagged subExpr)
 
   return <RefreshComponent
     initial={.text "rw!? is searching for rewrite lemmas..."}
-    refresh={← WithRpcRef.mk task}
+    state={← WithRpcRef.mk ref}
     cancelTk={← WithRpcRef.mk cancelTk} />
 
 /-- The component called by the `rw!?` tactic -/

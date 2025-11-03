@@ -62,7 +62,7 @@ function HtmlDisplay({ html }) {
         return _jsxs("span", { className: "red", children: ["Error rendering HTML: ", mapRpcError(state.error).message] });
     return _jsx(_Fragment, {});
 }
-export default function RefreshPanel(props) {
+export default function RefreshComponent(props) {
     const rs = useRpcSession();
     const [html, setHtml] = React.useState(props.initial);
     // Repeatedly call Lean to update
@@ -70,17 +70,17 @@ export default function RefreshPanel(props) {
         // Set the html to the initial value at the start of each re-render
         setHtml(props.initial);
         let cancelled = false;
-        async function loop(refresh) {
-            const result = await rs.call("ProofWidgets.awaitRefresh", refresh);
+        async function loop() {
+            const result = await rs.call("ProofWidgets.awaitRefresh", props.state);
             if (cancelled)
                 return;
             if (result.html) {
                 setHtml(result.html);
                 if (result.refresh)
-                    loop(result.refresh);
+                    loop();
             }
         }
-        loop(props.refresh);
+        loop();
         return () => {
             cancelled = true;
             if (props.cancelTk) {

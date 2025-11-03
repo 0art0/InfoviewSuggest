@@ -70,24 +70,24 @@ function HtmlDisplay({html} : {html: Html}): JSX.Element {
         return <span className="red">Error rendering HTML: {mapRpcError(state.error).message}</span>
     return <></>
 }
-
-export interface RefreshPanelProps {
+/** The arguments passed to a `RefreshComponent` */
+interface RefreshComponentProps {
   /** The initial HTML to display */
   initial: Html
-  /** A Lean task for iteratively refreshing the HTML display */
-  refresh: RpcPtr<'RefreshTask'>
-  /** A cancel token that will cancel the `refresh` computation */
+  /** The ref to the refresh state of the HTML display */
+  state: RpcPtr<'RefreshRef'>
+  /** A cancel token that will cancel the refresh computation */
   cancelTk? : RpcPtr<'IO.CancelToken'>
 }
 
-export interface RefreshResultProps {
+interface RefreshResultProps {
   /** The new HTML to display */
   html? : Html
-  /** A Lean task for continuing to refreshing the HTML display */
-  refresh? : RpcPtr<'RefreshTask'>
+  /** Whether to continue refreshing the HTML display */
+  refresh : boolean
 }
 
-export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
+export default function RefreshComponent(props: RefreshComponentProps): JSX.Element {
   const rs = useRpcSession()
   const [html, setHtml] = React.useState<Html>(props.initial)
 
@@ -96,19 +96,19 @@ export default function RefreshPanel(props: RefreshPanelProps): JSX.Element {
     // Set the html to the initial value at the start of each re-render
     setHtml(props.initial)
     let cancelled = false
-    async function loop(refresh: RpcPtr<'RefreshTask'>) {
-        const result = await rs.call<RpcPtr<'RefreshTask'>, RefreshResultProps> ("ProofWidgets.awaitRefresh", refresh)
+    async function loop() {
+        const result = await rs.call<RpcPtr<'RefreshRef'>, RefreshResultProps> ("ProofWidgets.awaitRefresh", props.state)
         if (cancelled) return
         if (result.html) {
             setHtml(result.html)
-            if (result.refresh) loop(result.refresh)
+            if (result.refresh) loop()
         }
     }
-    loop(props.refresh)
+    loop()
     return () => {
         cancelled = true
         if (props.cancelTk) {
-            rs.call<RpcPtr<'IO.CancelToken'>, void> ("ProofWidgets.cancelRefresh", props.cancelTk) 
+            rs.call<RpcPtr<'IO.CancelToken'>, void> ("ProofWidgets.cancelRefresh", props.cancelTk)
         }
     }
   }, [props])
