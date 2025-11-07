@@ -4,8 +4,9 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jovan Gerbscheid, Anand Rao
 -/
 import Mathlib.Lean.Meta.RefinedDiscrTree
-import Mathlib.Tactic.Widget.InteractiveUnfold
+import InfoviewSuggest.InteractiveUnfolds
 import InfoviewSuggest.RefreshComponent
+import ProofWidgets
 
 /-!
 # Point & click library rewriting
@@ -59,7 +60,7 @@ Ways to extend `rw!?`:
 
 namespace InfoviewSuggest.LibraryRewrite
 
-open Lean Meta RefinedDiscrTree Mathlib.Tactic
+open Lean Meta RefinedDiscrTree
 
 /-- The structure for rewrite lemmas stored in the `RefinedDiscrTree`. -/
 structure RewriteLemma where
@@ -166,10 +167,6 @@ private instance : Inhabited ExtState where
 private initialize importedRewriteLemmasExt : EnvExtension ExtState ←
   registerEnvExtension (IO.mkRef none)
 
-
-
-/-! ### Computing the Rewrites -/
-
 /-- Get all potential rewrite lemmas from the imported environment.
 By setting the `librarySearch.excludedModules` option, all lemmas from certain modules
 can be excluded. -/
@@ -193,6 +190,25 @@ def getModuleCandidates (e : Expr) : MetaM (Array (Array RewriteLemma)) := do
   let matchResult ← findModuleMatches moduleTreeRef e
   return matchResult.flatten
 
+/-- Construct the `RefinedDiscrTree` of all local hypotheses. -/
+def getHypotheses (except : Option FVarId) : MetaM (RefinedDiscrTree (FVarId × Bool)) := do
+  let mut tree : PreDiscrTree (FVarId × Bool) := {}
+  for decl in ← getLCtx do
+    if !decl.isImplementationDetail && except.all (· != decl.fvarId) then
+      for (val, entries) in ← addLocalRewriteEntry decl do
+        for (key, entry) in entries do
+          tree := tree.push key (entry, val)
+  return tree.toRefinedDiscrTree
+
+/-- Return all applicable hypothesis rewrites of `e`. Similar to `getImportRewrites`. -/
+def getHypothesisCandidates (e : Expr) (except : Option FVarId) :
+    MetaM (Array (Array (FVarId × Bool))) := do
+  let (candidates, _) ← (← getHypotheses except).getMatch e (unify := false) (matchRootStar := true)
+  return (← MonadExcept.ofExcept candidates).flatten
+
+
+
+/-! ### Checking rewrite lemmas -/
 
 /-- A rewrite lemma that has been applied to an expression. -/
 structure Rewrite where
@@ -208,36 +224,6 @@ structure Rewrite where
   makesNewMVars : Bool
   /-- Whether the rewrite is reflexive -/
   isRefl : Bool
-
-/-- Get the `BinderInfo`s for the arguments of `mkAppN fn args`. -/
-def getBinderInfos (fn : Expr) (args : Array Expr) : MetaM (Array BinderInfo) := do
-  let mut fnType ← inferType fn
-  let mut result := Array.mkEmpty args.size
-  let mut j := 0
-  for i in [:args.size] do
-    unless fnType.isForall do
-      fnType ← whnfD (fnType.instantiateRevRange j i args)
-      j := i
-    let .forallE _ _ b bi := fnType | throwError m! "expected function type {indentExpr fnType}"
-    fnType := b
-    result := result.push bi
-  return result
-
-/-- Determine whether the explicit parts of two expressions are equal,
-and the implicit parts are definitionally equal. -/
-partial def isExplicitEq (t s : Expr) : MetaM Bool := do
-  if t == s then
-    return true
-  unless t.getAppNumArgs == s.getAppNumArgs && t.getAppFn == s.getAppFn do
-    return false
-  let tArgs := t.getAppArgs
-  let sArgs := s.getAppArgs
-  let bis ← getBinderInfos t.getAppFn tArgs
-  t.getAppNumArgs.allM fun i _ =>
-    if bis[i]!.isExplicit then
-      isExplicitEq tArgs[i]! sArgs[i]!
-    else
-      isDefEq tArgs[i]! sArgs[i]!
 
 /-- If `thm` can be used to rewrite `e`, return the rewrite. -/
 def checkRewrite (thm e : Expr) (symm : Bool) : MetaM (Option Rewrite) := do
@@ -301,37 +287,8 @@ def Rewrite.toInfo (rw : Rewrite) (name : Name) : MetaM RewriteInfo := do
     replacement := ← abstractMVars rw.replacement
   }
 
-/-! ### Rewriting by hypotheses -/
-
-/-- Construct the `RefinedDiscrTree` of all local hypotheses. -/
-def getHypotheses (except : Option FVarId) : MetaM (RefinedDiscrTree (FVarId × Bool)) := do
-  let mut tree : PreDiscrTree (FVarId × Bool) := {}
-  for decl in ← getLCtx do
-    if !decl.isImplementationDetail && except.all (· != decl.fvarId) then
-      for (val, entries) in ← addLocalRewriteEntry decl do
-        for (key, entry) in entries do
-          tree := tree.push key (entry, val)
-  return tree.toRefinedDiscrTree
-
-/-- Return all applicable hypothesis rewrites of `e`. Similar to `getImportRewrites`. -/
-def getHypothesisCandidates (e : Expr) (except : Option FVarId) :
-    MetaM (Array (Array (FVarId × Bool))) := do
-  let (candidates, _) ← (← getHypotheses except).getMatch e (unify := false) (matchRootStar := true)
-  return (← MonadExcept.ofExcept candidates).flatten
-
-
-/-! ### User interface -/
 
 open Widget ProofWidgets Jsx Server
-
-/-- The information required for pasting a suggestion into the editor -/
-structure PasteInfo where
-  /-- The current document -/
-  «meta» : DocumentMeta
-  /-- The range that should be replaced.
-  In tactic mode, this should be the range of the suggestion tactic.
-  In infoview mode, the start and end of the range should both be the cursor position. -/
-  range : Lsp.Range
 
 /-- The information required for constructing the rewrite tactic syntax that will be
 pasted into the editor. -/
@@ -358,13 +315,6 @@ inductive Kind where
   /-- A rewrite with a lemma from an imported file -/
   | fromCache
 
-/-- Render the matching side of the rewrite lemma.
-This is shown at the header of each section of rewrite results. -/
-def pattern (type : Expr) (symm : Bool) : MetaM CodeWithInfos := do
-  forallTelescope type fun _ e => do
-    let some (lhs, rhs) := eqOrIff? e | throwError "Expected equation, not {indentExpr e}"
-    ppExprTagged <| if symm then rhs else lhs
-
 /-- `RwResult` stores the information from a rewrite lemma that was successful. -/
 structure RwResult where
   /-- `filtered` will be shown in the filtered view. -/
@@ -376,6 +326,11 @@ structure RwResult where
   /-- The `pattern` of the first lemma in a section is shown in the header of that section. -/
   pattern : CodeWithInfos
 deriving Inhabited
+
+instance : LT RwResult where
+  lt a b := a.info.lt b.info
+instance : DecidableLT RwResult
+  | a, b => by dsimp [LT.lt]; infer_instance
 
 /-- Pretty print the given constant, making sure not to print the `@` symbol.
 This is a HACK and there should be a more principled way to do this. -/
@@ -418,14 +373,13 @@ def Rewrite.toResult (rw : Rewrite) (name : Name ⊕ FVarId) (pasteInfo : RwPast
     info := ← rw.toInfo (match name with | .inl name => name | .inr fvarId => fvarId.name)
     pattern := ← pattern lemmaType rw.symm
   }
-
-/-- Helper function to generate a `Task` from a `CoreM` function. -/
-def CoreM.asTask {α} (k : CoreM α) (e : IO.Error → BaseIO α) : CoreM (Task α) := do
-  BaseIO.asTask <| EIO.catchExceptions ((·.1) <$> k.toIO (← read) (← get)) e
-
-/-- Helper function to generate a `Task` from a `MetaM` function. -/
-def MetaM.asTask {α} (k : MetaM α) (e : IO.Error → BaseIO α) : MetaM (Task α) := do
-  CoreM.asTask (k.run' (← read) (← get)) e
+where
+  /-- Render the matching side of the rewrite lemma.
+  This is shown at the header of each section of rewrite results. -/
+  pattern (type : Expr) (symm : Bool) : MetaM CodeWithInfos := do
+    forallTelescope type fun _ e => do
+      let some (lhs, rhs) := eqOrIff? e | throwError "Expected equation, not {indentExpr e}"
+      ppExprTagged <| if symm then rhs else lhs
 
 /-- `generateSuggestion` is called in parallel for all rewrite lemmas.
 - If the lemma succeeds, return a `RwResult`.
@@ -436,8 +390,8 @@ Note: we use two `try`-`catch` clauses, because we rely on `ppConstTagged`
 in the first `catch` branch, which could (in principle) throw an error again.
 -/
 def generateSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : RewriteLemma) :
-    MetaM <| Task (Except Html <| Option RwResult) :=
-  MetaM.asTask (
+    MetaM <| Task (Except Html <| Option RwResult) := do
+  BaseIO.asTask <| EIO.catchExceptions (← dropM do
     have : MonadExceptOf _ MetaM := MonadAlwaysExcept.except
     try .ok <$> withNewMCtxDepth do
       Core.checkSystem "rw!?"
@@ -455,16 +409,16 @@ def generateSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : RewriteLem
     fun e =>
       return .error
         <li>
-          An error occurred when processing hypothesis
+          An error occurred when pretty printing
           {.text lem.1.toString}:
           <br/>
-          {.text e.toString}
+          <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
         </li>
 
 /-- Similar to `generateSuggestion`, but using a local hypothesis. -/
 def generateLocalSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : FVarId × Bool) :
-    MetaM <| Task (Except Html <| Option RwResult) :=
-  MetaM.asTask (
+    MetaM <| Task (Except Html <| Option RwResult) := do
+  BaseIO.asTask <| EIO.catchExceptions (← dropM do
     have : MonadExceptOf _ MetaM := MonadAlwaysExcept.except
     try .ok <$> withNewMCtxDepth do
       Core.checkSystem "rw!?"
@@ -481,11 +435,14 @@ def generateLocalSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : FVarI
     fun e =>
       return .error
         <li>
-          An error occurred when processing hypothesis
+          An error occurred when pretty printing
           {.text lem.1.name.toString}:
           <br/>
-          {.text e.toString}
+          <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
         </li>
+
+
+/-! ### Maintaining the state of the widget -/
 
 /-- `SectionState` is the part of `WidgetState` corresponding to each section of suggestions. -/
 structure SectionState where
@@ -496,6 +453,53 @@ structure SectionState where
   /-- The computations for rewrite theorems that have not finished evaluating. -/
   pending : Array (Task (Except Html <| Option RwResult))
 
+def updateSectionState (s : SectionState) : MetaM (SectionState × Array Html) := do
+  let mut pending := #[]
+  let mut results := s.results
+  let mut exceptions := #[]
+  for t in s.pending do
+    if !(← IO.hasFinished t) then
+      pending := pending.push t
+    else
+      match t.get with
+      | .error e => exceptions := exceptions.push e
+      | .ok none => pure ()
+      | .ok (some result) =>
+        if let some idx ← findDuplicate result results then
+          if result < results[idx]! then
+            results := results.modify idx ({ · with filtered := none })
+            results := results.binInsert (· < ·) result
+          else
+            results := results.binInsert (· < ·) { result with filtered := none }
+        else
+          results := results.binInsert (· < ·) result
+  return ({ s with pending, results }, exceptions)
+where
+  /-- Check if there is already a duplicate of `result` in `results`,
+  for which both appear in the filtered view. -/
+  findDuplicate (result : RwResult) (results : Array RwResult) : MetaM (Option Nat) := do
+    unless result.filtered.isSome do
+      return none
+    results.findIdxM? fun res =>
+      pure res.filtered.isSome <&&> res.info.isDuplicate result.info
+
+/-- Render one section of rewrite results. -/
+def renderSection (filter : Bool) (s : SectionState) : Option Html := do
+  let head ← s.results[0]?
+  let suffix := match s.kind with
+    | .hypothesis => " (local hypotheses)"
+    | .fromFile => " (lemmas from current file)"
+    | .fromCache => ""
+  let suffix := if s.pending.isEmpty then suffix else suffix ++ " ⏳"
+  let htmls := if filter then s.results.filterMap (·.filtered) else s.results.map (·.unfiltered)
+  guard (!htmls.isEmpty)
+  return <details «open»={true}>
+    <summary className="mv2 pointer">
+      Pattern <InteractiveCode fmt={head.pattern}/> {.text suffix}
+    </summary>
+    {.element "ul" #[("style", json% { "padding-left" : "30px"})] htmls}
+  </details>
+
 /-- When the rewrite results are computed, `WidgetState` is used to keep track of the progress.
 Initially, it contains a bunch of unfinished `Task`s, and with each round of `updateWidgetState`,
 the finished tasks are stored as results in each `SectionState`. -/
@@ -505,63 +509,15 @@ structure WidgetState where
   /-- The errors that appeared in evaluating . -/
   exceptions : Array Html
 
-
-
-def initializeWidgetState (expr : Expr) (pasteInfo : RwPasteInfo)
-    (exceptFVarId : Option FVarId) : MetaM WidgetState := do
-  Core.checkSystem "rw!?"
-  let mut sections := #[]
-
-  for candidates in ← getHypothesisCandidates expr exceptFVarId do
-    let pending ← candidates.mapM (generateLocalSuggestion expr pasteInfo)
-    sections := sections.push { kind := .hypothesis, results := #[], pending }
-
-  for candidates in ← getModuleCandidates expr do
-    let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
-    sections := sections.push { kind := .fromFile, results := #[], pending }
-
-  for candidates in ← getImportCandidates expr do
-    let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
-    sections := sections.push { kind := .fromCache, results := #[], pending }
-
-  return { sections, exceptions := #[] }
-
 /-- Look a all of the pending `Task`s and if any of them gave a result, add this to the state. -/
 def updateWidgetState (state : WidgetState) : MetaM WidgetState := do
   let mut sections := #[]
   let mut exceptions := state.exceptions
   for s in state.sections do
-    let mut remaining := #[]
-    let mut results := s.results
-    for t in s.pending do
-      if !(← IO.hasFinished t) then
-        remaining := remaining.push t
-      else
-        match t.get with
-        | .error e => exceptions := exceptions.push e
-        | .ok none => pure ()
-        | .ok (some result) =>
-          if let some idx ← findDuplicate result results then
-            if result.info.lt results[idx]!.info then
-              results := results.modify idx ({ · with filtered := none })
-              results := results.binInsert (lt := (·.info.lt ·.info)) result
-            else
-              results := results.binInsert (lt := (·.info.lt ·.info)) { result with filtered := none }
-          else
-            results := results.binInsert (lt := (·.info.lt ·.info)) result
-    sections := sections.push { s with
-      pending := remaining
-      results := results.insertionSort (lt := (·.info.lt ·.info))
-    }
+    let (s, exs) ← updateSectionState s
+    sections := sections.push s
+    exceptions := exceptions ++ exs
   return { sections, exceptions }
-where
-  /-- Check if there is already a duplicate of `result` in `results`,
-  for which both appear in the filtered view. -/
-  findDuplicate (result : RwResult) (results : Array RwResult) : MetaM (Option Nat) := do
-    unless result.filtered.isSome do
-      return none
-    results.findIdxM? fun res =>
-      pure res.filtered.isSome <&&> res.info.isDuplicate result.info
 
 def renderWidget (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : Html :=
   <FilterDetails
@@ -596,36 +552,36 @@ where
         {Html.element "ul" #[("style", json% { "padding-left" : "30px"})] exceptions}
       </details>
 
-  /-- Render one section of rewrite results. -/
-  renderSection (filter : Bool) (s : SectionState) : Option Html := do
-    let head ← s.results[0]?
-    let suffix := match s.kind with
-      | .hypothesis => " (local hypotheses)"
-      | .fromFile => " (lemmas from current file)"
-      | .fromCache => ""
-    let suffix := if s.pending.isEmpty then suffix else suffix ++ " ⏳"
-    return <details «open»={true}>
-      <summary className="mv2 pointer">
-        Pattern <InteractiveCode fmt={head.pattern}/> {.text suffix}
-      </summary>
-      {← renderSectionCore filter s.results}
-    </details>
+def initializeWidgetState (expr : Expr) (pasteInfo : RwPasteInfo)
+    (exceptFVarId : Option FVarId) : MetaM WidgetState := do
+  Core.checkSystem "rw!?"
+  let mut sections := #[]
 
-  /-- Render the list of rewrite results in one section. -/
-  renderSectionCore (filter : Bool) (sec : Array RwResult) : Option Html := do
-    let htmls := if filter then sec.filterMap (·.filtered) else sec.map (·.unfiltered)
-    guard (!htmls.isEmpty)
-    return .element "ul" #[("style", json% { "padding-left" : "30px"})] htmls
+  for candidates in ← getHypothesisCandidates expr exceptFVarId do
+    let pending ← candidates.mapM (generateLocalSuggestion expr pasteInfo)
+    sections := sections.push { kind := .hypothesis, results := #[], pending }
+
+  for candidates in ← getModuleCandidates expr do
+    let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
+    sections := sections.push { kind := .fromFile, results := #[], pending }
+
+  for candidates in ← getImportCandidates expr do
+    let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
+    sections := sections.push { kind := .fromCache, results := #[], pending }
+
+  return { sections, exceptions := #[] }
+
+
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
 partial def waitAndUpdate (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) :
-    MetaM (RefreshResult MetaM) := do
+    MetaM (RefreshComponent.RefreshStep MetaM) := do
   -- If there is nothing to compute, return the final (empty) display
   if state.sections.all (·.pending.isEmpty) then
     return .last (renderWidget state unfolds? rewriteTarget)
   loop state
 where
-  loop (state : WidgetState) : MetaM (RefreshResult MetaM) := do
+  loop (state : WidgetState) : MetaM (RefreshComponent.RefreshStep MetaM) := do
     Core.checkSystem "rw!?"
     -- Wait until some task has finished
     while !(← liftM <| state.sections.anyM (·.pending.anyM IO.hasFinished)) do
@@ -635,29 +591,16 @@ where
     if state.sections.all (·.pending.isEmpty) then
       return .last (renderWidget state unfolds? rewriteTarget)
     else
-      return .cont (renderWidget state unfolds? rewriteTarget) (refreshM <| loop state)
+      return .cont (renderWidget state unfolds? rewriteTarget) (loop state)
 
 structure TacticInsertionProps extends PanelWidgetProps where
   replaceRange : Option Lsp.Range := none
   msg : Option String := none
 deriving RpcEncodable
 
-/--
-When the widget unloads, it is supposed to set the cancel token for the ongoing rpc call.
-However, this fails if the widget didn't have enough time to load properly,
-for example because the user is clicking very quickly in the infoview.
-So, `cancelTokenRef` is used to ensure that the previous call is cancelled.
--/
-private initialize cancelTokenRef : IO.Ref (Option IO.CancelToken) ←
-  IO.mkRef none
-
 @[server_rpc_method]
 private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   RequestM.asTask do
-  let cancelTk ← IO.CancelToken.new
-  if let some oldTk ← cancelTokenRef.swap cancelTk then
-    oldTk.set
-
   let doc ← RequestM.readDoc
   let some loc := props.selectedLocations.back? |
     return .text "rw!?: Please shift-click an expression you would like to rewrite."
@@ -666,44 +609,32 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
   let some goal := props.goals[0]? | return .text "rw!?: there is no goal to solve!"
   if loc.mvarId != goal.mvarId then
     return .text "rw!?: the selected expression should be in the main goal."
-  let ref ← RefreshRef.new
-  discard <| IO.asTask (prio := .dedicated) do
-    goal.ctx.val.runMetaM {} do withTheReader Core.Context ({ · with cancelTk? := cancelTk }) do
-      let md ← goal.mvarId.getDecl
-      let lctx := md.lctx |>.sanitizeNames.run' {options := (← getOptions)}
-      Meta.withLCtx lctx md.localInstances do
-      RefreshT.run ref do refreshM do
+  mkGoalRefreshComponent goal (.text "rw!? is searching for rewrite lemmas...") do
+    let rootExpr ← loc.rootExpr
+    -- TODO: instead of rejecting terms with bound variables, and rejecting terms with a bad motive,
+    -- use `simp_rw` as the suggested tactic instead of `rw`.
+    -- TODO: instead of computing the occurrences a single time (i.e. the `n` in `nth_rw n`),
+    -- compute the occurrence for each suggestion separately, to avoid inaccuracies.
+    let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
+      return .last <| .text "rw!?: expressions with bound variables are not yet supported"
+    unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
+      return .last <| .text "rw!?: the selected expression cannot be rewritten, \
+        because the motive is not type correct. \
+        This usually occurs when trying to rewrite a term that appears as a dependent argument."
+    let location ← loc.fvarId?.mapM FVarId.getUserName
 
-        let rootExpr ← loc.rootExpr
-        -- TODO: instead of rejecting terms with bound variables, and rejecting terms with a bad motive,
-        -- use `simp_rw` as the suggested tactic instead of `rw`.
-        -- TODO: instead of computing the occurrences a single time (i.e. the `n` in `nth_rw n`),
-        -- compute the occurrence for each suggestion separately, to avoid inaccuracies.
-        let some (subExpr, occ) ← withReducible <| viewKAbstractSubExpr rootExpr loc.pos |
-          return .last <| .text "rw!?: expressions with bound variables are not yet supported"
-        unless ← kabstractIsTypeCorrect rootExpr subExpr loc.pos do
-          return .last <| .text "rw!?: the selected expression cannot be rewritten, \
-            because the motive is not type correct. \
-            This usually occurs when trying to rewrite a term that appears as a dependent argument."
-        let location ← loc.fvarId?.mapM FVarId.getUserName
+    let range : Lsp.Range :=
+      if let .some range := props.replaceRange then
+        range
+      else
+        ⟨props.pos, props.pos⟩
 
-        let range : Lsp.Range :=
-          if let .some range := props.replaceRange then
-            range
-          else
-            ⟨props.pos, props.pos⟩
-
-        let pasteInfo := { «meta» := doc.meta, range, occ, hyp? := location }
-        let state ← initializeWidgetState subExpr pasteInfo loc.fvarId?
-        -- Computing the unfold is cheap enough that it doesn't need a separate thread.
-        -- However, we do this after the parallel computations have already been spawned by `initializeWidgetState`.
-        let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
-        waitAndUpdate state unfolds? (← ppExprTagged subExpr)
-
-  return <RefreshComponent
-    initial={.text "rw!? is searching for rewrite lemmas..."}
-    state={← WithRpcRef.mk ref}
-    cancelTk={← WithRpcRef.mk cancelTk} />
+    let pasteInfo := { «meta» := doc.meta, range, occ, hyp? := location }
+    let state ← initializeWidgetState subExpr pasteInfo loc.fvarId?
+    -- Computing the unfold is cheap enough that it doesn't need a separate thread.
+    -- However, we do this after the parallel computations have already been spawned by `initializeWidgetState`.
+    let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
+    waitAndUpdate state unfolds? (← ppExprTagged subExpr)
 
 /-- The component called by the `rw!?` tactic -/
 @[widget_module]
