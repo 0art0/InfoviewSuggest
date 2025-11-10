@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jovan Gerbscheid
 -/
 import ProofWidgets.Data.Html
+import InfoviewSuggest.Util
 
 /-!
 ## The `RefreshComponent` widget
@@ -19,35 +20,6 @@ To determine whether the widget is up to date, each computed HTML has an associa
 When the widget (re)loads, it first loads the current HTML from the ref, and then
 repeatedly awaits further HTML result.
 -/
-
-section MonadDrop
-
-/--
-The class `MonadDrop m n` allows a computation in monad `m` to be run in monad `n`.
-For example, a `MetaM` computation can be ran in `EIO Exception`,
-which can then be ran as a task using `EIO.asTask`.
--/
-class MonadDrop (m : Type → Type) (n : outParam <| Type → Type) where
-  /-- Translates an action from monad `m` into monad `n`. -/
-  dropM {α} : m α → m (n α)
-
-export MonadDrop (dropM)
-
-variable {m n : Type → Type} [Monad m] [MonadDrop m n]
-
-instance : MonadDrop m m where
-  dropM := pure
-
-instance {ρ} : MonadDrop (ReaderT ρ m) n where
-  dropM act := fun ctx => dropM (act ctx)
-
-instance {σ} : MonadDrop (StateT σ m) n where
-  dropM act := do liftM <| dropM <| act.run' (← get)
-
-instance {ω σ} [MonadLiftT (ST ω) m] : MonadDrop (StateRefT' ω σ m) n where
-  dropM act := do liftM <| dropM <| act.run' (← get)
-
-end MonadDrop
 
 instance : Lean.Server.RpcEncodable Unit where
   rpcEncode _ := pure .null
@@ -124,13 +96,15 @@ structure RefreshComponentProps where
   cancelTk : Option (WithRpcRef IO.CancelToken)
   deriving RpcEncodable
 
+end RefreshComponent
+
 /-- Display an inital HTML, and repeatedly update the display with new HTML objects
 as they appear in `state`. A dedicated thread should be spawned in order to modify `state`. -/
 @[widget_module]
-def RefreshComponent : Component RefreshComponentProps where
+def RefreshComponent : Component RefreshComponent.RefreshComponentProps where
   javascript := "window;import{jsxs as e,jsx as t,Fragment as n}from\"react/jsx-runtime\";import*as r from\"react\";import a from\"react\";import{useRpcSession as o,EnvPosContext as s,useAsyncPersistent as i,mapRpcError as c,importWidgetModule as l}from\"@leanprover/infoview\";async function m(a,o,s){if(\"text\"in s)return t(n,{children:s.text});if(\"element\"in s){const[e,n,i]=s.element,c={};for(const[e,t]of n)c[e]=t;const l=await Promise.all(i.map((async e=>await m(a,o,e))));return\"hr\"===e?t(\"hr\",{}):0===l.length?r.createElement(e,c):r.createElement(e,c,l)}if(\"component\"in s){const[e,t,n,i]=s.component,c=await Promise.all(i.map((async e=>await m(a,o,e)))),f={...n,pos:o},u=await l(a,o,e);if(!(t in u))throw new Error(`Module '${e}' does not export '${t}'`);return 0===c.length?r.createElement(u[t],f):r.createElement(u[t],f,c)}return e(\"span\",{className:\"red\",children:[\"Unknown HTML variant: \",JSON.stringify(s)]})}function f({html:a}){const l=o(),f=r.useContext(s),u=i((()=>m(l,f,a)),[l,f,a]);return\"resolved\"===u.state?u.value:\"rejected\"===u.state?e(\"span\",{className:\"red\",children:[\"Error rendering HTML: \",c(u.error).message]}):t(n,{})}function u(e){const r=o(),[s,i]=a.useState(null);return a.useEffect((()=>{let t=!1;async function n(a){const o=await r.call(\"ProofWidgets.RefreshComponent.awaitRefresh\",{oldIdx:a,state:e.state});if(!t&&o)return i(o.html),n(o.idx)}return(async()=>{const a=await r.call(\"ProofWidgets.RefreshComponent.getCurrState\",e.state);if(!t)i(a.html),n(a.idx)})(),()=>{t=!0,e.cancelTk&&r.call(\"ProofWidgets.RefreshComponent.cancelRefresh\",e.cancelTk)}}),[e]),s?t(f,{html:s}):t(n,{})}export{u as default};"
 
-
+namespace RefreshComponent
 /-! ## API for creating `RefreshComponent`s -/
 
 /-- The monad transformer for maintaining a `RefreshComponent`. -/

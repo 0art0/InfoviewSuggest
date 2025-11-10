@@ -58,7 +58,7 @@ Ways to extend `rw!?`:
 
 /-! ### Caching -/
 
-namespace InfoviewSuggest.LibraryRewrite
+namespace InfoviewSuggest.Rw
 
 open Lean Meta RefinedDiscrTree
 
@@ -266,14 +266,6 @@ def RewriteInfo.isDuplicate (a b : RewriteInfo) : MetaM Bool :=
     <&&> isExplicitEq a.replacement.expr b.replacement.expr
 
 open Widget ProofWidgets Jsx Server
-
-/-- The information required for constructing the rewrite tactic syntax that will be
-pasted into the editor. -/
-structure RwPasteInfo extends PasteInfo where
-  /-- The occurence at which to rewrite, to be used as `nth_rw n` -/
-  occ : Option Nat
-  /-- The hypothesis at which to rewrite, to be used as `at h` -/
-  hyp? : Option Name
 
 /-- Return the rewrite tactic that performs the rewrite. -/
 def tacticSyntax (rw : Rewrite) (pasteInfo : RwPasteInfo) :
@@ -584,3 +576,5 @@ elab stx:"rw!?" : tactic => do
   let some replaceRange := (← getFileMap).lspRangeOfStx? stx | return
   Widget.savePanelWidgetInfo (hash LibraryRewriteComponent.javascript)
     (pure <| json% { replaceRange: $replaceRange }) stx
+
+end InfoviewSuggest.Rw

@@ -65,6 +65,13 @@ structure PasteInfo where
   In infoview mode, the start and end of the range should both be the cursor position. -/
   replaceRange : Lsp.Range
 
+/-- The information required for constructing the rewrite tactic syntax that will be
+pasted into the editor. -/
+structure RwPasteInfo extends PasteInfo where
+  /-- The occurence at which to rewrite, to be used as `nth_rw n` -/
+  occ : Option Nat
+  /-- The hypothesis at which to rewrite, to be used as `at h` -/
+  hyp? : Option Name
 
 /-- Return syntax for the rewrite tactic `rw [e]`. -/
 def mkRewrite (occ : Option Nat) (symm : Bool) (e : Term) (loc : Option Name) :
@@ -111,3 +118,34 @@ partial def isExplicitEq (t s : Expr) : MetaM Bool := do
       isExplicitEq tArgs[i]! sArgs[i]!
     else
       withNewMCtxDepth <| isDefEq tArgs[i]! sArgs[i]!
+
+end InfoviewSuggest
+
+section MonadDrop
+
+/--
+The class `MonadDrop m n` allows a computation in monad `m` to be run in monad `n`.
+For example, a `MetaM` computation can be ran in `EIO Exception`,
+which can then be ran as a task using `EIO.asTask`.
+-/
+class MonadDrop (m : Type → Type) (n : outParam <| Type → Type) where
+  /-- Translates an action from monad `m` into monad `n`. -/
+  dropM {α} : m α → m (n α)
+
+export MonadDrop (dropM)
+
+variable {m n : Type → Type} [Monad m] [MonadDrop m n]
+
+instance : MonadDrop m m where
+  dropM := pure
+
+instance {ρ} : MonadDrop (ReaderT ρ m) n where
+  dropM act := fun ctx => dropM (act ctx)
+
+instance {σ} : MonadDrop (StateT σ m) n where
+  dropM act := do liftM <| dropM <| act.run' (← get)
+
+instance {ω σ} [MonadLiftT (ST ω) m] : MonadDrop (StateRefT' ω σ m) n where
+  dropM act := do liftM <| dropM <| act.run' (← get)
+
+end MonadDrop
