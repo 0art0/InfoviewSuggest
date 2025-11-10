@@ -129,19 +129,18 @@ def tacticSyntax (e eNew : Expr) (occ : Option Nat) (loc : Option Name) :
 
 /-- Render the unfolds of `e` as given by `filteredUnfolds`, with buttons at each suggestion
 for pasting the rewrite tactic. Return `none` when there are no unfolds. -/
-def renderUnfolds (e : Expr) (occ : Option Nat) (loc : Option Name) (range : Lsp.Range)
-    (doc : FileWorker.EditableDocument) : MetaM (Option Html) := do
+def renderUnfolds (e : Expr) (occ : Option Nat) (loc : Option Name) (pasteInfo : PasteInfo) : MetaM (Option Html) := do
   let results ← filteredUnfolds e
   if results.isEmpty then
     return none
   let core ← results.mapM fun unfold => do
     let tactic ← tacticSyntax e unfold occ loc
-    let tactic ← tacticPasteString tactic range
+    let tactic ← tacticPasteString tactic pasteInfo.replaceRange
     return <li> {
       .element "p" #[] <|
         #[<span className="font-code" style={json% { "white-space" : "pre-wrap" }}> {
           Html.ofComponent MakeEditLink
-            (.ofReplaceRange doc.meta range tactic)
+            (.ofReplaceRange pasteInfo.meta pasteInfo.replaceRange tactic)
             #[.text <| Format.pretty <| (← Meta.ppExpr unfold)] }
         </span>]
       } </li>
@@ -177,7 +176,7 @@ private def rpc (props : SelectInsertParams) : RequestM (RequestTask Html) :=
           "not type correct. This usually occurs when trying to rewrite a term that appears " ++
           "as a dependent argument."
       let location ← loc.fvarId?.mapM FVarId.getUserName
-      let html ← renderUnfolds subExpr occ location props.replaceRange doc
+      let html ← renderUnfolds subExpr occ location { «meta» := doc.meta, replaceRange := props.replaceRange }
       return html.getD
         <span>
           No unfolds found for {<InteractiveCode fmt={← ppExprTagged subExpr}/>}

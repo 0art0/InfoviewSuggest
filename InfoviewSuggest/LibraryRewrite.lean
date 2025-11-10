@@ -64,20 +64,12 @@ open Lean Meta RefinedDiscrTree
 
 /-- The structure for rewrite lemmas stored in the `RefinedDiscrTree`. -/
 structure RewriteLemma where
-  /-- The name of the lemma -/
-  name : Name
+  /-- The lemma -/
+  name : Premise
   /-- `symm` is `true` when rewriting from right to left -/
   symm : Bool
-deriving BEq, Inhabited, ToJson, FromJson
 
-structure RewriteLemmaWithDisplay extends RewriteLemma where
-  prettyLemma : Widget.CodeWithInfos
-deriving Server.RpcEncodable
-
-instance : ToFormat RewriteLemma where
-  format lem := f! "{if lem.symm then "← " else ""}{lem.name}"
-
-/-- Return `true` if `s` and `t` are equal up to changing the `MVarId`s. -/
+/-- Return `true` if `s` and `t` are equal up to swapping the `MVarId`s. -/
 def isMVarSwap (t s : Expr) : Bool :=
   go t s {} |>.isSome
 where
@@ -128,50 +120,36 @@ def addRewriteEntry (name : Name) (cinfo : ConstantInfo) :
   setMCtx {} -- recall that the metavariable context is not guaranteed to be empty at the start
   let (_, _, eqn) ← forallMetaTelescope cinfo.type
   let some (lhs, rhs) := eqOrIff? eqn | return []
-  let badMatch e :=
-    e.getAppFn.isMVar ||
-    -- this extra check excludes general equality lemmas that apply at any equality
-    -- these are almost never useful, and there are very many of them.
-    e.eq?.any fun (α, l, r) =>
-      α.getAppFn.isMVar && l.getAppFn.isMVar && r.getAppFn.isMVar && l != r
-  if badMatch lhs then
-    if badMatch rhs then
+  if isBadMatch lhs then
+    if isBadMatch rhs then
       return []
     else
-      return [({ name, symm := true }, ← initializeLazyEntryWithEta rhs)]
+      return [({ name := .const name, symm := true }, ← initializeLazyEntryWithEta rhs)]
   else
-    let result := ({ name, symm := false }, ← initializeLazyEntryWithEta lhs)
-    if badMatch rhs || isMVarSwap lhs rhs then
+    let result := ({ name := .const name, symm := false }, ← initializeLazyEntryWithEta lhs)
+    if isBadMatch rhs || isMVarSwap lhs rhs then
       return [result]
     else
-      return [result, ({ name, symm := true }, ← initializeLazyEntryWithEta rhs)]
+      return [result, ({ name := .const name, symm := true }, ← initializeLazyEntryWithEta rhs)]
 
 
 /-- Try adding the local hypothesis to the `RefinedDiscrTree`. -/
-def addLocalRewriteEntry (decl : LocalDecl) :
-    MetaM (List ((FVarId × Bool) × List (Key × LazyEntry))) :=
+def addLocalRewriteEntry (decl : LocalDecl) : MetaM (List (RewriteLemma × List (Key × LazyEntry))) :=
   withReducible do
   let (_, _, eqn) ← forallMetaTelescope decl.type
   let some (lhs, rhs) := eqOrIff? eqn | return []
-  let result := ((decl.fvarId, false), ← initializeLazyEntryWithEta lhs)
-  return [result, ((decl.fvarId, true), ← initializeLazyEntryWithEta rhs)]
+  return [
+    ({ name := .fvar decl.fvarId, symm := false }, ← initializeLazyEntryWithEta lhs),
+    ({ name := .fvar decl.fvarId, symm := true }, ← initializeLazyEntryWithEta rhs)]
 
-private abbrev ExtState := IO.Ref (Option (RefinedDiscrTree RewriteLemma))
-
-private initialize ExtState.default : ExtState ←
-  IO.mkRef none
-
-private instance : Inhabited ExtState where
-  default := ExtState.default
-
-private initialize importedRewriteLemmasExt : EnvExtension ExtState ←
+initialize importedRewriteLemmasExt : EnvExtension (IO.Ref (Option (RefinedDiscrTree RewriteLemma))) ←
   registerEnvExtension (IO.mkRef none)
 
 /-- Get all potential rewrite lemmas from the imported environment.
 By setting the `librarySearch.excludedModules` option, all lemmas from certain modules
 can be excluded. -/
-def getImportCandidates (e : Expr) : MetaM (Array (Array RewriteLemma)) := do
-  let matchResult ← findImportMatches importedRewriteLemmasExt addRewriteEntry
+def getImportCandidates (e : Expr) : MetaM (MatchResult RewriteLemma) := do
+  findImportMatches importedRewriteLemmasExt addRewriteEntry
     /-
     5000 constants seems to be approximately the right number of tasks
     Too many means the tasks are too long.
@@ -181,18 +159,16 @@ def getImportCandidates (e : Expr) : MetaM (Array (Array RewriteLemma)) := do
     which is the largest capacity it gets to reach.
     -/
     (constantsPerTask := 5000) (capacityPerTask := 256) e
-  return matchResult.flatten
 
 /-- Get all potential rewrite lemmas from the current file. Exclude lemmas from modules
 in the `librarySearch.excludedModules` option. -/
-def getModuleCandidates (e : Expr) : MetaM (Array (Array RewriteLemma)) := do
+def getModuleCandidates (e : Expr) : MetaM (MatchResult RewriteLemma) := do
   let moduleTreeRef ← createModuleTreeRef addRewriteEntry
-  let matchResult ← findModuleMatches moduleTreeRef e
-  return matchResult.flatten
+  findModuleMatches moduleTreeRef e
 
 /-- Construct the `RefinedDiscrTree` of all local hypotheses. -/
-def getHypotheses (except : Option FVarId) : MetaM (RefinedDiscrTree (FVarId × Bool)) := do
-  let mut tree : PreDiscrTree (FVarId × Bool) := {}
+def getHypotheses (except : Option FVarId) : MetaM (RefinedDiscrTree RewriteLemma) := do
+  let mut tree : PreDiscrTree RewriteLemma := {}
   for decl in ← getLCtx do
     if !decl.isImplementationDetail && except.all (· != decl.fvarId) then
       for (val, entries) in ← addLocalRewriteEntry decl do
@@ -200,20 +176,30 @@ def getHypotheses (except : Option FVarId) : MetaM (RefinedDiscrTree (FVarId × 
           tree := tree.push key (entry, val)
   return tree.toRefinedDiscrTree
 
-/-- Return all applicable hypothesis rewrites of `e`. Similar to `getImportRewrites`. -/
+/-- Return all applicable hypothesis rewrites of `e`. Similar to `getImportCandidates`. -/
 def getHypothesisCandidates (e : Expr) (except : Option FVarId) :
-    MetaM (Array (Array (FVarId × Bool))) := do
+    MetaM (MatchResult RewriteLemma) := do
   let (candidates, _) ← (← getHypotheses except).getMatch e (unify := false) (matchRootStar := true)
-  return (← MonadExcept.ofExcept candidates).flatten
+  MonadExcept.ofExcept candidates
 
 
 
 /-! ### Checking rewrite lemmas -/
 
-/-- A rewrite lemma that has been applied to an expression. -/
-structure Rewrite where
-  /-- `symm` is `true` when rewriting from right to left -/
+structure RewriteInfo where
+  numGoals : Nat
   symm : Bool
+  nameLenght : Nat
+  replacementSize : Nat
+  name : String
+  -- TODO: in this implementation, we conclude that two rewrites are the same if they
+  -- rewrite into the same expression. But there can be two rewrites that have
+  -- different side conditions!
+  replacement : AbstractMVarsResult
+deriving Inhabited
+
+/-- A rewrite lemma that has been applied to an expression. -/
+structure Rewrite extends RewriteLemma where
   /-- The proof of the rewrite -/
   proof : Expr
   /-- The replacement expression obtained from the rewrite -/
@@ -224,16 +210,22 @@ structure Rewrite where
   makesNewMVars : Bool
   /-- Whether the rewrite is reflexive -/
   isRefl : Bool
+  info : RewriteInfo
 
-/-- If `thm` can be used to rewrite `e`, return the rewrite. -/
-def checkRewrite (thm e : Expr) (symm : Bool) : MetaM (Option Rewrite) := do
-  withTraceNodeBefore `rw!? (return m!
-    "rewriting {e} by {if symm then "← " else ""}{thm}") do
+/-- If `thm` can be used to rewrite `e`, return the rewrite.
+HACK: the `name` argument is set to `FVarId.name` in the local rewrite case.
+This works conveniently. -/
+def checkRewrite (lem : RewriteLemma) (e : Expr) : MetaM (Option Rewrite) := do
+  let thm ← match lem.name with
+    | .const name => mkConstWithFreshMVarLevels name
+    | .fvar fvarId => pure (.fvar fvarId)
+  withTraceNodeBefore `infoview_suggest (return m!
+    "rewriting {e} by {if lem.symm then "← " else ""}{thm}") do
   let (mvars, binderInfos, eqn) ← forallMetaTelescope (← inferType thm)
   let some (lhs, rhs) := eqOrIff? eqn | return none
-  let (lhs, rhs) := if symm then (rhs, lhs) else (lhs, rhs)
-  let unifies ← withTraceNodeBefore `rw!? (return m! "unifying {e} =?= {lhs}")
-    (withReducible (isDefEq lhs e))
+  let (lhs, rhs) := if lem.symm then (rhs, lhs) else (lhs, rhs)
+  let unifies ← withTraceNodeBefore `infoview_suggest (return m! "unifying {e} =?= {lhs}")
+    (withReducible (isDefEq e lhs))
   unless unifies do return none
   -- just like in `kabstract`, we compare the `HeadIndex` and number of arguments
   let lhs ← instantiateMVars lhs
@@ -241,7 +233,7 @@ def checkRewrite (thm e : Expr) (symm : Bool) : MetaM (Option Rewrite) := do
   -- instead of just not showing the suggestion.
   if lhs.toHeadIndex != e.toHeadIndex || lhs.headNumArgs != e.headNumArgs then
     return none
-  try synthAppInstances `rw!? default mvars binderInfos false false catch _ => return none
+  try synthAppInstances `infoview_suggest default mvars binderInfos false false catch _ => return none
   let mut extraGoals := #[]
   for mvar in mvars, bi in binderInfos do
     unless ← mvar.mvarId!.isAssigned do
@@ -251,19 +243,15 @@ def checkRewrite (thm e : Expr) (symm : Bool) : MetaM (Option Rewrite) := do
   let makesNewMVars := (replacement.findMVar? fun mvarId => mvars.any (·.mvarId! == mvarId)).isSome
   let proof ← instantiateMVars (mkAppN thm mvars)
   let isRefl ← isExplicitEq e replacement
-  return some { symm, proof, replacement, extraGoals, makesNewMVars, isRefl }
-
-initialize
-  registerTraceClass `rw!?
-
-structure RewriteInfo where
-  numGoals : Nat
-  symm : Bool
-  nameLenght : Nat
-  replacementSize : Nat
-  name : Name
-  replacement : AbstractMVarsResult
-deriving Inhabited
+  let info := {
+    numGoals := extraGoals.size
+    symm := lem.symm
+    nameLenght := lem.name.length
+    replacementSize := (← ppExpr replacement).pretty.length
+    name := lem.name.toString
+    replacement := ← abstractMVars replacement
+  }
+  return some { lem with proof, replacement, extraGoals, makesNewMVars, isRefl, info }
 
 def RewriteInfo.lt (a b : RewriteInfo) : Bool :=
   Ordering.isLT <|
@@ -271,22 +259,11 @@ def RewriteInfo.lt (a b : RewriteInfo) : Bool :=
   (compare a.2 b.2).then <|
   (compare a.3 b.3).then <|
   (compare a.4 b.4).then <|
-  (a.5.cmp b.5)
+  (compare a.5 b.5)
 
 def RewriteInfo.isDuplicate (a b : RewriteInfo) : MetaM Bool :=
   pure (a.replacement.mvars.size == b.replacement.mvars.size)
     <&&> isExplicitEq a.replacement.expr b.replacement.expr
-
-def Rewrite.toInfo (rw : Rewrite) (name : Name) : MetaM RewriteInfo := do
-  return {
-    numGoals := rw.extraGoals.size
-    symm := rw.symm
-    nameLenght := name.toString.length
-    replacementSize := (← ppExpr rw.replacement).pretty.length
-    name
-    replacement := ← abstractMVars rw.replacement
-  }
-
 
 open Widget ProofWidgets Jsx Server
 
@@ -300,20 +277,9 @@ structure RwPasteInfo extends PasteInfo where
 
 /-- Return the rewrite tactic that performs the rewrite. -/
 def tacticSyntax (rw : Rewrite) (pasteInfo : RwPasteInfo) :
-    MetaM (TSyntax `tactic) := withoutModifyingMCtx do
-  -- we want the new metavariables to be printed as `?_` in the tactic syntax
-  for (mvarId, _) in rw.extraGoals do mvarId.setTag .anonymous
-  let proof ← withOptions (pp.mvars.anonymous.set · false) (PrettyPrinter.delab rw.proof)
+    MetaM (TSyntax `tactic) := do
+  let proof ← withOptions (pp.mvars.set · false) (PrettyPrinter.delab rw.proof)
   mkRewrite pasteInfo.occ rw.symm proof pasteInfo.hyp?
-
-/-- The kind of rewrite -/
-inductive Kind where
-  /-- A rewrite with a local hypothesis -/
-  | hypothesis
-  /-- A rewrite with a lemma from the current file -/
-  | fromFile
-  /-- A rewrite with a lemma from an imported file -/
-  | fromCache
 
 /-- `RwResult` stores the information from a rewrite lemma that was successful. -/
 structure RwResult where
@@ -329,32 +295,27 @@ deriving Inhabited
 
 instance : LT RwResult where
   lt a b := a.info.lt b.info
-instance : DecidableLT RwResult
-  | a, b => by dsimp [LT.lt]; infer_instance
 
-/-- Pretty print the given constant, making sure not to print the `@` symbol.
-This is a HACK and there should be a more principled way to do this. -/
-def ppConstTagged (name : Name) : MetaM CodeWithInfos := do
-  return match ← ppExprTagged (← mkConstWithLevelParams name) with
-    | .tag tag _ => .tag tag (.text s!"{name}")
-    | code => code
+instance : DecidableLT RwResult := fun a b => by
+  dsimp [LT.lt]; infer_instance
 
 /-- Construct the `Result` from a `Rewrite`. -/
-def Rewrite.toResult (rw : Rewrite) (name : Name ⊕ FVarId) (pasteInfo : RwPasteInfo) : MetaM RwResult := do
-  let tactic ← tacticPasteString (← tacticSyntax rw pasteInfo) pasteInfo.range
-  let replacementString := Format.pretty (← ppExpr rw.replacement)
+def Rewrite.toResult (rw : Rewrite) (pasteInfo : RwPasteInfo) : MetaM RwResult := do
+  let tactic ← tacticPasteString (← tacticSyntax rw pasteInfo) pasteInfo.replaceRange
+  let replacementString := (← ppExpr rw.replacement).pretty
   let mut extraGoals := #[]
   for (mvarId, bi) in rw.extraGoals do
+    -- TODO: think more carefully about which goals should be displayed
+    -- Are there lemmas where a hypothesis is marked as implicit,
+    -- which we would still want to show as a new goal?
     if bi.isExplicit then
       extraGoals := extraGoals.push (← ppExprTagged (← mvarId.getType))
-  let prettyLemma ← match name with
-    | .inl name => ppConstTagged name
-    | .inr fvarId => ppExprTagged (.fvar fvarId)
+  let prettyLemma ← ppPremiseTagged rw.name
   let html (showNames : Bool) : Html :=
     let button :=
       <span className="font-code"> {
         Html.ofComponent MakeEditLink
-          (.ofReplaceRange pasteInfo.meta pasteInfo.range tactic)
+          (.ofReplaceRange pasteInfo.meta pasteInfo.replaceRange tactic)
           #[.text replacementString] }
       </span>
     let extraGoals := extraGoals.flatMap fun extraGoal =>
@@ -364,22 +325,22 @@ def Rewrite.toResult (rw : Rewrite) (name : Name ⊕ FVarId) (pasteInfo : RwPast
         #[button] ++ extraGoals ++
           if showNames then #[<br/>, <InteractiveCode fmt={prettyLemma}/>] else #[] }
     </li>
-  let lemmaType ← match name with
-    | .inl name => (·.type) <$> getConstInfo name
-    | .inr fvarId => inferType (.fvar fvarId)
+  let lemmaType ← match rw.name with
+    | .const name => (·.type) <$> getConstInfo name
+    | .fvar fvarId => inferType (.fvar fvarId)
   return {
     filtered := if !rw.isRefl && !rw.makesNewMVars then html false else none
     unfiltered := html true
-    info := ← rw.toInfo (match name with | .inl name => name | .inr fvarId => fvarId.name)
-    pattern := ← pattern lemmaType rw.symm
+    info := rw.info
+    pattern := ← pattern lemmaType
   }
 where
   /-- Render the matching side of the rewrite lemma.
   This is shown at the header of each section of rewrite results. -/
-  pattern (type : Expr) (symm : Bool) : MetaM CodeWithInfos := do
+  pattern (type : Expr) : MetaM CodeWithInfos := do
     forallTelescope type fun _ e => do
       let some (lhs, rhs) := eqOrIff? e | throwError "Expected equation, not {indentExpr e}"
-      ppExprTagged <| if symm then rhs else lhs
+      ppExprTagged <| if rw.symm then rhs else lhs
 
 /-- `generateSuggestion` is called in parallel for all rewrite lemmas.
 - If the lemma succeeds, return a `RwResult`.
@@ -395,65 +356,35 @@ def generateSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : RewriteLem
     have : MonadExceptOf _ MetaM := MonadAlwaysExcept.except
     try .ok <$> withNewMCtxDepth do
       Core.checkSystem "rw!?"
-      let thm ← mkConstWithFreshMVarLevels lem.name
-      let some rewrite ← checkRewrite thm expr lem.symm | return none
-      some <$> rewrite.toResult (.inl lem.name) pasteInfo
+      let some rewrite ← checkRewrite lem expr | return none
+      some <$> rewrite.toResult pasteInfo
     catch e =>
       return .error
         <li>
-          An error occurred when processing theorem
-          <InteractiveCode fmt={← ppConstTagged lem.name}/>:
+          An error occurred when processing rewrite lemma <InteractiveCode fmt={← ppPremiseTagged lem.name}/>:
           <br/>
           <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
         </li>)
     fun e =>
       return .error
         <li>
-          An error occurred when pretty printing
-          {.text lem.1.toString}:
+          An error occurred when pretty printing rewrite lemma {.text lem.1.toString}:
           <br/>
           <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
         </li>
-
-/-- Similar to `generateSuggestion`, but using a local hypothesis. -/
-def generateLocalSuggestion (expr : Expr) (pasteInfo : RwPasteInfo) (lem : FVarId × Bool) :
-    MetaM <| Task (Except Html <| Option RwResult) := do
-  BaseIO.asTask <| EIO.catchExceptions (← dropM do
-    have : MonadExceptOf _ MetaM := MonadAlwaysExcept.except
-    try .ok <$> withNewMCtxDepth do
-      Core.checkSystem "rw!?"
-      let some rewrite ← checkRewrite (.fvar lem.1) expr lem.2 | return none
-      some <$> rewrite.toResult (.inr lem.1) pasteInfo
-    catch e =>
-      return .error
-        <li>
-          An error occurred when processing hypothesis
-          <InteractiveCode fmt={← ppExprTagged (.fvar lem.1)}/>:
-          <br/>
-          <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
-        </li>)
-    fun e =>
-      return .error
-        <li>
-          An error occurred when pretty printing
-          {.text lem.1.name.toString}:
-          <br/>
-          <InteractiveMessage msg={← WithRpcRef.mk e.toMessageData} />
-        </li>
-
 
 /-! ### Maintaining the state of the widget -/
 
 /-- `SectionState` is the part of `WidgetState` corresponding to each section of suggestions. -/
 structure SectionState where
   /-- Whether the rewrites are using a local hypothesis, a local theorem, or an imported theorem. -/
-  kind : Kind
+  kind : PremiseKind
   /-- The results of the theorems that successfully rewrite. -/
   results : Array RwResult
   /-- The computations for rewrite theorems that have not finished evaluating. -/
   pending : Array (Task (Except Html <| Option RwResult))
 
-def updateSectionState (s : SectionState) : MetaM (SectionState × Array Html) := do
+def updateSectionState (s : SectionState) : MetaM (Array Html × SectionState) := do
   let mut pending := #[]
   let mut results := s.results
   let mut exceptions := #[]
@@ -473,7 +404,7 @@ def updateSectionState (s : SectionState) : MetaM (SectionState × Array Html) :
             results := results.binInsert (· < ·) { result with filtered := none }
         else
           results := results.binInsert (· < ·) result
-  return ({ s with pending, results }, exceptions)
+  return (exceptions, { s with pending, results })
 where
   /-- Check if there is already a duplicate of `result` in `results`,
   for which both appear in the filtered view. -/
@@ -506,23 +437,24 @@ the finished tasks are stored as results in each `SectionState`. -/
 structure WidgetState where
   /-- The states of the sections in the widget. -/
   sections : Array SectionState
-  /-- The errors that appeared in evaluating . -/
+  /-- The errors that appeared in evaluating. -/
   exceptions : Array Html
+  /-- The HTML shown at the top of the suggestions. -/
+  header : Html
 
 /-- Look a all of the pending `Task`s and if any of them gave a result, add this to the state. -/
 def updateWidgetState (state : WidgetState) : MetaM WidgetState := do
   let mut sections := #[]
   let mut exceptions := state.exceptions
   for s in state.sections do
-    let (s, exs) ← updateSectionState s
+    let (exs, s) ← updateSectionState s
     sections := sections.push s
     exceptions := exceptions ++ exs
-  return { sections, exceptions }
+  return { state with sections, exceptions }
 
 def renderWidget (state : WidgetState) (unfolds? : Option Html) (rewriteTarget : CodeWithInfos) : Html :=
   <FilterDetails
-    -- TODO: actually say what expression these suggestions are for
-    summary={.text "Rewrite suggestions:"}
+    summary={state.header}
     all={render false state unfolds? rewriteTarget}
     filtered={render true state unfolds? rewriteTarget}
     initiallyFiltered={true} />
@@ -557,20 +489,21 @@ def initializeWidgetState (expr : Expr) (pasteInfo : RwPasteInfo)
   Core.checkSystem "rw!?"
   let mut sections := #[]
 
-  for candidates in ← getHypothesisCandidates expr exceptFVarId do
-    let pending ← candidates.mapM (generateLocalSuggestion expr pasteInfo)
+  for candidates in (← getHypothesisCandidates expr exceptFVarId).flatten do
+    let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
     sections := sections.push { kind := .hypothesis, results := #[], pending }
 
-  for candidates in ← getModuleCandidates expr do
+  for candidates in (← getModuleCandidates expr).flatten do
     let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
     sections := sections.push { kind := .fromFile, results := #[], pending }
 
-  for candidates in ← getImportCandidates expr do
+  for candidates in (← getImportCandidates expr).flatten do
     let pending ← candidates.mapM (generateSuggestion expr pasteInfo)
     sections := sections.push { kind := .fromCache, results := #[], pending }
 
-  return { sections, exceptions := #[] }
-
+  return {
+    sections, exceptions := #[]
+    header := <span> Rewrite suggestions for <InteractiveCode fmt={← ppExprTagged expr}/>: </span> }
 
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/
@@ -594,20 +527,16 @@ where
       return .cont (renderWidget state unfolds? rewriteTarget) (loop state)
 
 structure TacticInsertionProps extends PanelWidgetProps where
-  replaceRange : Option Lsp.Range := none
-  msg : Option String := none
+  replaceRange : Lsp.Range
 deriving RpcEncodable
 
-@[server_rpc_method]
-private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
-  RequestM.asTask do
+def suggestionWidget (props : TacticInsertionProps) (loc : SubExpr.GoalsLocation) : RequestM Html := do
   let doc ← RequestM.readDoc
-  let some loc := props.selectedLocations.back? |
-    return .text "rw!?: Please shift-click an expression you would like to rewrite."
   if loc.loc matches .hypValue .. then
     return .text "rw!?: cannot rewrite in the value of a let variable."
   let some goal := props.goals[0]? | return .text "rw!?: there is no goal to solve!"
   if loc.mvarId != goal.mvarId then
+    -- TODO: if the user select some other goal, then use the `on_goal n =>` tactic to rewrite there.
     return .text "rw!?: the selected expression should be in the main goal."
   mkGoalRefreshComponent goal (.text "rw!? is searching for rewrite lemmas...") do
     let rootExpr ← loc.rootExpr
@@ -622,24 +551,24 @@ private def rpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
         because the motive is not type correct. \
         This usually occurs when trying to rewrite a term that appears as a dependent argument."
     let location ← loc.fvarId?.mapM FVarId.getUserName
-
-    let range : Lsp.Range :=
-      if let .some range := props.replaceRange then
-        range
-      else
-        ⟨props.pos, props.pos⟩
-
-    let pasteInfo := { «meta» := doc.meta, range, occ, hyp? := location }
+    let pasteInfo := { «meta» := doc.meta, replaceRange := props.replaceRange, occ, hyp? := location }
     let state ← initializeWidgetState subExpr pasteInfo loc.fvarId?
     -- Computing the unfold is cheap enough that it doesn't need a separate thread.
     -- However, we do this after the parallel computations have already been spawned by `initializeWidgetState`.
-    let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location range doc
+    let unfolds? ← InteractiveUnfold.renderUnfolds subExpr occ location pasteInfo.toPasteInfo
     waitAndUpdate state unfolds? (← ppExprTagged subExpr)
+
+@[server_rpc_method]
+private def tacticRpc (props : TacticInsertionProps) : RequestM (RequestTask Html) :=
+  RequestM.asTask do
+  let some loc := props.selectedLocations.back? |
+    return .text "rw!?: Please shift-click an expression you would like to rewrite."
+  suggestionWidget props loc
 
 /-- The component called by the `rw!?` tactic -/
 @[widget_module]
 def LibraryRewriteComponent : Component TacticInsertionProps :=
-  mk_rpc_widget% LibraryRewrite.rpc
+  mk_rpc_widget% tacticRpc
 
 /--
 `rw!?` is an interactive tactic that suggests rewrites for any expression selected by the user.
@@ -652,22 +581,6 @@ are filtered out, as well as rewrites that have new metavariables in the replace
 To see all suggestions, click on the filter button (▼) in the top right.
 -/
 elab stx:"rw!?" : tactic => do
-  let some range := (← getFileMap).lspRangeOfStx? stx | return
+  let some replaceRange := (← getFileMap).lspRangeOfStx? stx | return
   Widget.savePanelWidgetInfo (hash LibraryRewriteComponent.javascript)
-    (pure <| json% { replaceRange: $range }) stx
-
-private def withTreeCtx (ctx : Core.Context) : Core.Context :=
-  { ctx with maxHeartbeats := 0, diag := getDiag ctx.options }
-
-open Mathlib Tactic RefinedDiscrTree Lean
-elab "#infoview_suggest" : command => do
-  let ref := importedRewriteLemmasExt.getState (← getEnv)
-  if (← ref.get).isNone then
-    let tree ← Elab.Command.liftCoreM do
-      let ngen ← getNGen
-      let (cNGen, ngen) := ngen.mkChild
-      setNGen ngen
-      withTheReader Core.Context withTreeCtx do
-          createImportedDiscrTree cNGen (← getEnv) addRewriteEntry 5000 256
-    ref.set tree
-  Elab.Command.elabCommand <| ← `(show_panel_widgets [LibraryRewriteComponent])
+    (pure <| json% { replaceRange: $replaceRange }) stx
