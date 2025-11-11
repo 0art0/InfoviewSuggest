@@ -22,7 +22,7 @@ def addApplyEntry (name : Name) (cinfo : ConstantInfo) :
 def addLocalApplyEntry (decl : LocalDecl) :
     MetaM (List (ApplyLemma × List (Key × LazyEntry))) :=
   withReducible do
-  let (_, _, e) ← forallMetaTelescope decl.type
+  let (_, _, e) ← forallMetaTelescopeReducing decl.type
   return [(⟨.fvar decl.fvarId⟩, ← initializeLazyEntryWithEta e)]
 
 initialize importedApplyLemmasExt : EnvExtension (IO.Ref (Option (RefinedDiscrTree ApplyLemma))) ←
@@ -92,7 +92,7 @@ def checkApplication (lem : ApplyLemma) (target : Expr): MetaM (Option Applicati
     | .const name => mkConstWithFreshMVarLevels name
     | .fvar fvarId => pure (.fvar fvarId)
   withTraceNodeBefore `infoview_suggest (return m!"applying {thm} to {target}") do
-  let (mvars, binderInfos, e) ← forallMetaTelescope (← inferType thm)
+  let (mvars, binderInfos, e) ← forallMetaTelescopeReducing (← inferType thm)
   let unifies ← withTraceNodeBefore `infoview_suggest (return m! "unifying {e} =?= {target}")
     (withReducible (isDefEq e target))
   unless unifies do return none
@@ -132,7 +132,7 @@ def ApplicationInfo.isDuplicate (a b : ApplicationInfo) : MetaM Bool :=
 /-- Return the `apply` tactic that performs the application. -/
 def tacticSyntax (app : Application) : MetaM (TSyntax `tactic) := do
   let proof ← withOptions (pp.mvars.set · false) (PrettyPrinter.delab app.proof)
-  `(tactic| apply $proof)
+  `(tactic| refine $proof)
 
 /-- `ApplyResult` stores the information from an apply lemma that was successful. -/
 structure ApplyResult where
@@ -164,21 +164,13 @@ def Application.toResult (app : Application) (pasteInfo : PasteInfo) :
     if bi.isExplicit then
       newGoals := newGoals.push (← ppExprTagged (← mvarId.getType))
   let prettyLemma ← ppPremiseTagged app.name
-  let html (showNames : Bool) : Html :=
-    let button :=
-      -- TODO: let's see if this works, and if we can add any hover information to the button.
-      <span className="font-code"> {
-        Html.ofComponent MakeEditLink
-          (.ofReplaceRange pasteInfo.meta pasteInfo.replaceRange tactic)
-            #[<a className={"link pointer mh2 dim codicon codicon-filter"}/>] }
-      </span>
-    let newGoals := newGoals.flatMap fun extraGoal =>
-      #[<br/>, <strong className="goal-vdash">⊢ </strong>, <InteractiveCode fmt={extraGoal}/>];
-    <li>
-      { .element "p" #[] <|
-        #[button] ++ newGoals ++
-          if showNames then #[<br/>, <InteractiveCode fmt={prettyLemma}/>] else #[] }
-    </li>
+
+  let html (showNames : Bool) :=
+    mkSuggestionElement tactic pasteInfo <|
+      let newGoals := newGoals.map (<div> <strong className="goal-vdash">⊢ </strong> <InteractiveCode fmt={·}/> </div>)
+      let noGoals := <div style={json% { "margin-top" : "0.15em" }}> Goals accomplished! 🎉 </div>
+      let newGoals := if newGoals.isEmpty then #[noGoals] else newGoals
+      .element "div" #[] <| newGoals ++ if showNames then #[<div> <InteractiveCode fmt={prettyLemma}/> </div>] else #[]
   let lemmaType ← match app.name with
     | .const name => (·.type) <$> getConstInfo name
     | .fvar fvarId => inferType (.fvar fvarId)
@@ -271,11 +263,6 @@ def renderSection (filter : Bool) (s : SectionState) : Option Html := do
   let suffix := if s.pending.isEmpty then suffix else suffix ++ " ⏳"
   let htmls := if filter then s.results.filterMap (·.filtered) else s.results.map (·.unfiltered)
   guard (!htmls.isEmpty)
-  return <details «open»={true}>
-    <summary className="mv2 pointer">
-      Pattern <InteractiveCode fmt={head.pattern}/> {.text suffix}
-    </summary>
-    {.element "ul" #[("style", json% { "padding-left" : "30px"})] htmls}
-  </details>
+  return mkListElement htmls <span> Apply to pattern <InteractiveCode fmt={head.pattern}/> {.text suffix} </span>
 
 end Apply

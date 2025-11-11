@@ -133,23 +133,11 @@ def renderUnfolds (e : Expr) (occ : Option Nat) (loc : Option Name) (pasteInfo :
   let results ← filteredUnfolds e
   if results.isEmpty then
     return none
-  let core ← results.mapM fun unfold => do
+  let htmls ← results.mapM fun unfold => do
     let tactic ← tacticSyntax e unfold occ loc
     let tactic ← tacticPasteString tactic pasteInfo.replaceRange
-    return <li> {
-      .element "p" #[] <|
-        #[<span className="font-code" style={json% { "white-space" : "pre-wrap" }}> {
-          Html.ofComponent MakeEditLink
-            (.ofReplaceRange pasteInfo.meta pasteInfo.replaceRange tactic)
-            #[.text <| Format.pretty <| (← Meta.ppExpr unfold)] }
-        </span>]
-      } </li>
-  return <details «open»={true}>
-    <summary className="mv2 pointer">
-      {.text "Definitional rewrites:"}
-    </summary>
-    {.element "ul" #[("style", json% { "padding-left" : "30px"})] core}
-  </details>
+    return mkSuggestionElement tactic pasteInfo <InteractiveCode fmt={← ppExprTagged unfold}/>
+  return mkListElement htmls <| .text "Definitional rewrites:"
 
 
 @[server_rpc_method_cancellable]

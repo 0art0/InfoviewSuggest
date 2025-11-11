@@ -136,8 +136,8 @@ def addRewriteEntry (name : Name) (cinfo : ConstantInfo) :
 /-- Try adding the local hypothesis to the `RefinedDiscrTree`. -/
 def addLocalRewriteEntry (decl : LocalDecl) : MetaM (List (RewriteLemma × List (Key × LazyEntry))) :=
   withReducible do
-  let (_, _, eqn) ← forallMetaTelescope decl.type
-  let some (lhs, rhs) := eqOrIff? eqn | return []
+  let (_, _, eqn) ← forallMetaTelescopeReducing decl.type
+  let some (lhs, rhs) := eqOrIff? (← whnf eqn) | return []
   return [
     ({ name := .fvar decl.fvarId, symm := false }, ← initializeLazyEntryWithEta lhs),
     ({ name := .fvar decl.fvarId, symm := true }, ← initializeLazyEntryWithEta rhs)]
@@ -221,8 +221,8 @@ def checkRewrite (lem : RewriteLemma) (e : Expr) : MetaM (Option Rewrite) := do
     | .fvar fvarId => pure (.fvar fvarId)
   withTraceNodeBefore `infoview_suggest (return m!
     "rewriting {e} by {if lem.symm then "← " else ""}{thm}") do
-  let (mvars, binderInfos, eqn) ← forallMetaTelescope (← inferType thm)
-  let some (lhs, rhs) := eqOrIff? eqn | return none
+  let (mvars, binderInfos, eqn) ← forallMetaTelescopeReducing (← inferType thm)
+  let some (lhs, rhs) := eqOrIff? (← whnf eqn) | return none
   let (lhs, rhs) := if lem.symm then (rhs, lhs) else (lhs, rhs)
   let unifies ← withTraceNodeBefore `infoview_suggest (return m! "unifying {e} =?= {lhs}")
     (withReducible (isDefEq e lhs))
@@ -294,7 +294,7 @@ instance : DecidableLT RwResult := fun a b => by
 /-- Construct the `Result` from a `Rewrite`. -/
 def Rewrite.toResult (rw : Rewrite) (pasteInfo : RwPasteInfo) : MetaM RwResult := do
   let tactic ← tacticPasteString (← tacticSyntax rw pasteInfo) pasteInfo.replaceRange
-  let replacementString := (← ppExpr rw.replacement).pretty
+  let replacementString ← ppExprTagged rw.replacement
   let mut extraGoals := #[]
   for (mvarId, bi) in rw.extraGoals do
     -- TODO: think more carefully about which goals should be displayed
@@ -304,19 +304,12 @@ def Rewrite.toResult (rw : Rewrite) (pasteInfo : RwPasteInfo) : MetaM RwResult :
       extraGoals := extraGoals.push (← ppExprTagged (← mvarId.getType))
   let prettyLemma ← ppPremiseTagged rw.name
   let html (showNames : Bool) : Html :=
-    let button :=
-      <span className="font-code"> {
-        Html.ofComponent MakeEditLink
-          (.ofReplaceRange pasteInfo.meta pasteInfo.replaceRange tactic)
-          #[.text replacementString] }
-      </span>
+    mkSuggestionElement tactic pasteInfo.toPasteInfo <|
     let extraGoals := extraGoals.flatMap fun extraGoal =>
-      #[<br/>, <strong className="goal-vdash">⊢ </strong>, <InteractiveCode fmt={extraGoal}/>];
-    <li>
-      { .element "p" #[] <|
-        #[button] ++ extraGoals ++
-          if showNames then #[<br/>, <InteractiveCode fmt={prettyLemma}/>] else #[] }
-    </li>
+      #[<div> <strong className="goal-vdash">⊢ </strong> <InteractiveCode fmt={extraGoal}/> </div>];
+    .element "div" #[] <|
+      #[<InteractiveCode fmt={replacementString}/>] ++ extraGoals ++
+        if showNames then #[<div> <InteractiveCode fmt={prettyLemma}/> </div>] else #[]
   let lemmaType ← match rw.name with
     | .const name => (·.type) <$> getConstInfo name
     | .fvar fvarId => inferType (.fvar fvarId)
@@ -330,8 +323,8 @@ where
   /-- Render the matching side of the rewrite lemma.
   This is shown at the header of each section of rewrite results. -/
   pattern (type : Expr) : MetaM CodeWithInfos := do
-    forallTelescope type fun _ e => do
-      let some (lhs, rhs) := eqOrIff? e | throwError "Expected equation, not {indentExpr e}"
+    forallTelescopeReducing type fun _ e => do
+      let some (lhs, rhs) := eqOrIff? (← whnf e) | throwError "Expected equation, not {indentExpr e}"
       ppExprTagged <| if rw.symm then rhs else lhs
 
 /-- `generateSuggestion` is called in parallel for all rewrite lemmas.
@@ -416,12 +409,7 @@ def renderSection (filter : Bool) (s : SectionState) : Option Html := do
   let suffix := if s.pending.isEmpty then suffix else suffix ++ " ⏳"
   let htmls := if filter then s.results.filterMap (·.filtered) else s.results.map (·.unfiltered)
   guard (!htmls.isEmpty)
-  return <details «open»={true}>
-    <summary className="mv2 pointer">
-      Pattern <InteractiveCode fmt={head.pattern}/> {.text suffix}
-    </summary>
-    {.element "ul" #[("style", json% { "padding-left" : "30px"})] htmls}
-  </details>
+  return mkListElement htmls <span> Rewrite pattern <InteractiveCode fmt={head.pattern}/> {.text suffix} </span>
 
 /-- When the rewrite results are computed, `WidgetState` is used to keep track of the progress.
 Initially, it contains a bunch of unfinished `Task`s, and with each round of `updateWidgetState`,

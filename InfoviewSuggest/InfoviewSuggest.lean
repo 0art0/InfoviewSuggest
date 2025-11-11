@@ -1,5 +1,5 @@
 import InfoviewSuggest.Apply
-import InfoviewSuggest.LibraryRewrite
+import InfoviewSuggest.Rewrite
 
 namespace InfoviewSuggest
 open Lean Meta Server Widget ProofWidgets Jsx
@@ -100,27 +100,27 @@ def initializeWidgetState (expr : Expr) (pasteInfo : RwPasteInfo)
   let cand := Std.TreeMap.mergeWith (fun _ a b => a ++ b)
     ((← Rw.getHypothesisCandidates expr exceptFVarId).elts.map fun _ => (·.map Candidates.rw))
     ((← Apply.getHypothesisCandidates expr exceptFVarId).elts.map fun _ => (·.map Candidates.apply))
-  for (_, cand) in cand do
+  for (_, cand) in cand.toArray.reverse do
     for cand in cand do
       sections := sections.push (← cand.generateSuggestion expr pasteInfo .hypothesis)
 
   let cand := Std.TreeMap.mergeWith (fun _ a b => a ++ b)
     ((← Rw.getModuleCandidates expr).elts.map fun _ => (·.map Candidates.rw))
     ((← Apply.getModuleCandidates expr).elts.map fun _ => (·.map Candidates.apply))
-  for (_, cand) in cand do
+  for (_, cand) in cand.toArray.reverse do
     for cand in cand do
-      sections := sections.push (← cand.generateSuggestion expr pasteInfo .hypothesis)
+      sections := sections.push (← cand.generateSuggestion expr pasteInfo .fromFile)
 
   let cand := Std.TreeMap.mergeWith (fun _ a b => a ++ b)
     ((← Rw.getImportCandidates expr).elts.map fun _ => (·.map Candidates.rw))
     ((← Apply.getImportCandidates expr).elts.map fun _ => (·.map Candidates.apply))
-  for (_, cand) in cand do
+  for (_, cand) in cand.toArray.reverse do
     for cand in cand do
-      sections := sections.push (← cand.generateSuggestion expr pasteInfo .hypothesis)
+      sections := sections.push (← cand.generateSuggestion expr pasteInfo .fromCache)
 
   return {
     sections, exceptions := #[]
-    header := <span> Rewrite suggestions for <InteractiveCode fmt={← ppExprTagged expr}/>: </span> }
+    header := <span> Suggestions for <InteractiveCode fmt={← ppExprTagged expr}/>: </span> }
 
 
 /-- Repeatedly run `updateWidgetState` until there is an update, and then return the result. -/

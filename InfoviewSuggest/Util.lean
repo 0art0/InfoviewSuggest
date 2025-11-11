@@ -119,6 +119,29 @@ partial def isExplicitEq (t s : Expr) : MetaM Bool := do
     else
       withNewMCtxDepth <| isDefEq tArgs[i]! sArgs[i]!
 
+def mkSuggestionElement (tactic : String) (pasteInfo : PasteInfo) (html : Html) : Html :=
+  let button :=
+    -- TODO: The hover on this button should be a `CodeWithInfos`, instead of a string.
+    <span className="font-code"> {
+      Html.ofComponent MakeEditLink
+        (.ofReplaceRange pasteInfo.meta pasteInfo.replaceRange tactic)
+        #[<a
+          className={"mh2 codicon codicon-insert"}
+          style={json% { "position" : "relative", "top" : "0.15em"}}
+          title={tactic} />] }
+    </span>;
+
+  <li style={json% { "display" : "flex", "align-items" : "flex-start", "margin-bottom" : "1em" }}>
+    {button}
+    {html}
+  </li>
+
+def mkListElement (htmls : Array Html) (header : Html) : Html :=
+  <details «open»={true}>
+    <summary className="mv2 pointer"> {header} </summary>
+    {.element "ul" #[("style", json% { "padding-left" : "0", "list-style" : "none"})] htmls}
+  </details>
+
 end InfoviewSuggest
 
 section MonadDrop
